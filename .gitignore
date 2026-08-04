@@ -17,3 +17,5 @@ x64/
 
 # Plug-intro
 AnimBannerWidget.h
+
+build/

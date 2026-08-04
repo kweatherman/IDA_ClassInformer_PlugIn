@@ -1,22 +1,19 @@
 
 // Main Dialog
-#include "stdafx.h"
+#include "StdAfx.h"
 #include "MainDialog.h"
-#ifdef SPECIAL_EDITION
-#include "AnimBannerWidget.h"
-#endif
 
 #include <QtWidgets/QDialogButtonBox>
 
 
-MainDialog::MainDialog(BOOL &optionPlaceStructs, BOOL &optionProcessStatic, BOOL &optionAudioOnDone, SegSelect::segments &segs, qstring &version, size_t animSwitch) : QDialog(QApplication::activeWindow())
+MainDialog::MainDialog(bool &optionPlaceStructs, bool &optionProcessStatic, bool &optionAudioOnDone, SegSelect::segments &segs, qstring &version, size_t /*animSwitch*/) : QDialog(QApplication::activeWindow())
 {
     Ui::MainCIDialog::setupUi(this);
     setWindowFlags(windowFlags() & ~Qt::WindowContextHelpButtonHint);
     buttonBox->addButton("CONTINUE", QDialogButtonBox::AcceptRole);
     buttonBox->addButton("CANCEL", QDialogButtonBox::RejectRole);
 
-    #define INITSTATE(obj,state) obj->setCheckState((state == TRUE) ? Qt::Checked : Qt::Unchecked);
+    #define INITSTATE(obj,state) obj->setCheckState((state) ? Qt::Checked : Qt::Unchecked);
     INITSTATE(checkBox1, optionPlaceStructs);
     INITSTATE(checkBox2, optionProcessStatic);
     INITSTATE(checkBox3, optionAudioOnDone);
@@ -28,24 +25,12 @@ MainDialog::MainDialog(BOOL &optionPlaceStructs, BOOL &optionProcessStatic, BOOL
         setStyleSheet(QTextStream(&file).readAll());
 
 	this->segs = &segs;
-    this->setWindowTitle(QString("Class Informer %1").arg(version.c_str()));
+    this->setWindowTitle(QString("Class Informer ") + QString(version.c_str()));
 
-    // TODO: Compile switch the animated banner code in. So for a private version it's there, for the public version it's not.
-    // And for the private version have a switch to "run()" to not show the banner.
-
-    // Setup banner widget static or animated
+    // Setup banner widget - static banner
 	QRect bannerGeometry(0, 0, 292, 74);
     QWidget *bannerWidget = NULL;
 
-    #ifdef SPECIAL_EDITION
-    #pragma message(__LOC2__ "    >> Special edition build <<")
-	if (animSwitch != 2)
-    {
-		// Instance the animated version of the banner
-		bannerWidget = new AnimBannerWidget(this, animSwitch == 1);
-	}    
-	else 
-    #endif
     {
 		// Create the static banner (QLabel)
 		QLabel *image = new QLabel(this);
@@ -57,8 +42,8 @@ MainDialog::MainDialog(BOOL &optionPlaceStructs, BOOL &optionProcessStatic, BOOL
 		image->setToolTip(QString::fromUtf8(""));
         #endif
 		bannerWidget = image;
-	}    
-	bannerWidget->setGeometry(bannerGeometry);  
+	}
+	bannerWidget->setGeometry(bannerGeometry);
 }
 
 // On choose segments
@@ -67,10 +52,10 @@ void MainDialog::segmentSelect()
 	SegSelect::select(*this->segs, (SegSelect::DATA_HINT | SegSelect::RDATA_HINT), "Choose segments to scan");
 }
 
-// Do main dialog, return TRUE if canceled
-BOOL doMainDialog(BOOL &optionPlaceStructs, BOOL &optionProcessStatic, BOOL &optionAudioOnDone, __out SegSelect::segments &segs, qstring &version, size_t animSwitch)
+// Do main dialog, return true if canceled
+bool doMainDialog(bool &optionPlaceStructs, bool &optionProcessStatic, bool &optionAudioOnDone, SegSelect::segments &segs, qstring &version, size_t animSwitch)
 {
-	BOOL result = TRUE;
+	bool result = true;
     MainDialog *dlg = new MainDialog(optionPlaceStructs, optionProcessStatic, optionAudioOnDone, segs, version, animSwitch);
     if (dlg->exec())
     {
@@ -79,7 +64,7 @@ BOOL doMainDialog(BOOL &optionPlaceStructs, BOOL &optionProcessStatic, BOOL &opt
         CHECKSTATE(checkBox2, optionProcessStatic);
         CHECKSTATE(checkBox3, optionAudioOnDone);
         #undef CHECKSTATE
-		result = FALSE;
+		result = false;
     }
 	delete dlg;
     return(result);

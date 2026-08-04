@@ -1,14 +1,11 @@
 
 // Class Informer
-#include "stdafx.h"
+#include "StdAfx.h"
 #include "Main.h"
 #include "Vftable.h"
 #include "RTTI.h"
 #include "MainDialog.h"
 #include <map>
-//
-#include <WaitBoxEx.h>
-#include <IdaOgg.h>
 
 // Netnode constants
 const static char NETNODE_NAME[] = {"$ClassInformer_node"};
@@ -31,10 +28,10 @@ enum NETINDX
 struct TBLENTRY
 {
     ea_t vft;
-    WORD methods;
-    WORD flags;
-    WORD strSize;
-    char str[MAXSPECSIZE - (sizeof(ea_t) + (sizeof(WORD) * 3))]; // Note: IDA MAXSTR = 1024
+    uint16_t methods;
+    uint16_t flags;
+    uint16_t strSize;
+    char str[MAXSPECSIZE - (sizeof(ea_t) + (sizeof(uint16_t) * 3))]; // Note: IDA MAXSTR = 1024
 };
 #pragma pack(pop)
 static_assert(sizeof(TBLENTRY) == MAXSPECSIZE);
@@ -46,16 +43,15 @@ static const bgcolor_t NOT_PARENT_COLOR = GRAY(235);
 
 // === Function Prototypes ===
 static void cacheSegments();
-static BOOL processStaticTables();
+static bool processStaticTables();
 static void showEndStats();
-static BOOL gatherRttiDataSet(SegSelect::segments &segs);
+static bool gatherRttiDataSet(SegSelect::segments &segs);
 
 // === Data ===
 static TIMESTAMP s_startTime = 0;
-static HMODULE myModuleHandle = NULL;
-static UINT32 staticCCtorCnt = 0, staticCppCtorCnt = 0, staticCDtorCnt = 0;
-static UINT32 startingFuncCount = 0, staticCtorDtorCnt = 0;
-static BOOL initResourcesOnce = FALSE;
+static uint32_t staticCCtorCnt = 0, staticCppCtorCnt = 0, staticCDtorCnt = 0;
+static uint32_t startingFuncCount = 0, staticCtorDtorCnt = 0;
+static bool initResourcesOnce = false;
 static int chooserIcon = 0;
 static netnode *netNode = NULL;
 static std::vector<SEGMENT> segmentCache;
@@ -68,15 +64,15 @@ extern eaSet superSet, colSet, vftSet;
 // "_initterm*" Static ctor/dtor pattern container
 struct INITTERM_ARGPAT
 {
-	LPCSTR pattern;
-	UINT32 start, end;
+	const char *pattern;
+	uint32_t start, end;
 };
 std::vector<INITTERM_ARGPAT> initTermArgPatterns;
 
 // Options
-BOOL g_optionPlaceStructs  = TRUE;
-BOOL g_optionProcessStatic = TRUE;
-BOOL g_optionAudioOnDone   = TRUE;
+bool g_optionPlaceStructs  = true;
+bool g_optionProcessStatic = true;
+bool g_optionAudioOnDone   = true;
 
 static void freeWorkingData()
 {
@@ -102,7 +98,6 @@ plugmod_t* idaapi init()
     char procName[IDAINFO_PROCNAME_SIZE + 1] = { 0 };
     if(inf_get_procname(procName, sizeof(procName)) && (strncmp(procName, "metapc", IDAINFO_PROCNAME_SIZE) == 0))
 	{
-		GetModuleHandleEx((GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT | GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS), (LPCTSTR) &init, &myModuleHandle);
 		return PLUGIN_KEEP;
 	}
 
@@ -127,7 +122,7 @@ void idaapi term()
 			}
 
 			Q_CLEANUP_RESOURCE(ClassInformerRes);
-			initResourcesOnce = FALSE;
+			initResourcesOnce = false;
 		}
 	}
 	CATCH()
@@ -147,14 +142,14 @@ static void newNetnodeStore()
     netNode->altset_idx8(NIDX_COUNT, 0, NN_DATA_TAG);
 }
 
-static WORD getStoreVersion(){ return((WORD) netNode->altval_idx8(NIDX_VERSION, NN_DATA_TAG)); }
-static UINT32 getTableCount(){ return(netNode->altval_idx8(NIDX_COUNT, NN_DATA_TAG)); }
-static BOOL setTableCount(UINT32 count){ return(netNode->altset_idx8(NIDX_COUNT, count, NN_DATA_TAG)); }
-static BOOL getTableEntry(TBLENTRY &entry, UINT32 index){ return(netNode->supval(index, &entry, sizeof(TBLENTRY), NN_TABLE_TAG) > 0); }
-static BOOL setTableEntry(TBLENTRY &entry, UINT32 index){ return(netNode->supset(index, &entry, (offsetof(TBLENTRY, str) + entry.strSize), NN_TABLE_TAG)); }
+static uint16_t getStoreVersion(){ return((uint16_t) netNode->altval_idx8(NIDX_VERSION, NN_DATA_TAG)); }
+static uint32_t getTableCount(){ return((uint32_t)netNode->altval_idx8(NIDX_COUNT, NN_DATA_TAG)); }
+static bool setTableCount(uint32_t count){ return(netNode->altset_idx8(NIDX_COUNT, count, NN_DATA_TAG)); }
+static bool getTableEntry(TBLENTRY &entry, uint32_t index){ return(netNode->supval(index, &entry, sizeof(TBLENTRY), NN_TABLE_TAG) > 0); }
+static bool setTableEntry(TBLENTRY &entry, uint32_t index){ return(netNode->supset(index, &entry, (offsetof(TBLENTRY, str) + entry.strSize), NN_TABLE_TAG)); }
 
 // Add an entry to the vftable list
-void addTableEntry(UINT32 flags, ea_t vft, int methodCount, LPCSTR format, ...)
+void addTableEntry(uint32_t flags, ea_t vft, int methodCount, const char *format, ...)
 {
 	TBLENTRY e;
 	e.vft = vft;
@@ -163,11 +158,11 @@ void addTableEntry(UINT32 flags, ea_t vft, int methodCount, LPCSTR format, ...)
 
 	va_list vl;
 	va_start(vl, format);
-	vsnprintf_s(e.str, sizeof(e.str), SIZESTR(e.str), format, vl);
+	vsnprintf(e.str, sizeof(e.str), format, vl);
 	va_end(vl);
-	e.strSize = (WORD) (strlen(e.str) + 1);
+	e.strSize = (uint16_t) (strlen(e.str) + 1);
 
-	UINT32 count = getTableCount();
+	uint32_t count = getTableCount();
 	setTableEntry(e, count);
 	setTableCount(++count);
 }
@@ -175,7 +170,7 @@ void addTableEntry(UINT32 flags, ea_t vft, int methodCount, LPCSTR format, ...)
 
 // RTTI list chooser
 static const char LBTITLE[] = { "[Class Informer]" };
-static const UINT32 LBCOLUMNCOUNT = 5;
+static const uint32_t LBCOLUMNCOUNT = 5;
 static const int LBWIDTHS[LBCOLUMNCOUNT] = { (8 | CHCOL_HEX), (4 | CHCOL_DEC), 3, 19, 500 };
 static const char *const LBHEADER[LBCOLUMNCOUNT] =
 {
@@ -192,9 +187,9 @@ public:
 	rtti_chooser() : chooser_multi_t(CH_QFTYP_DEFAULT, LBCOLUMNCOUNT, LBWIDTHS, LBHEADER, LBTITLE)
 	{
 		// Create a minimal hex address format string w/leading zero
-		UINT32 count = getTableCount();
+		uint32_t count = getTableCount();
 		ea_t largestAddres = 0;
-		for (UINT32 i = 0; i < count; i++)
+		for (uint32_t i = 0; i < count; i++)
 		{
 			TBLENTRY e; e.vft = 0;
 			getTableEntry(e, i);
@@ -223,7 +218,7 @@ public:
 			{
 				// Generate the line
 				TBLENTRY e;
-				getTableEntry(e, (UINT32)n);
+				getTableEntry(e, (uint32_t)n);
 
 				// vft address
 				qstrvec_t &cols = *cols_;
@@ -245,12 +240,12 @@ public:
 				cols[2] = flags;
 
 				// Type
-				LPCSTR tag = strchr(e.str, '@');
+				const char *tag = strchr(e.str, '@');
 				if (tag)
 				{
 					char buffer[MAXSTR];
-					int pos = (tag - e.str);
-					if (pos > SIZESTR(buffer)) pos = SIZESTR(buffer);
+					int pos = (int)(tag - e.str);
+					if (pos > (int)SIZESTR(buffer)) pos = (int)SIZESTR(buffer);
 					memcpy(buffer, e.str, pos);
 					buffer[pos] = 0;
 					cols[3] = buffer;
@@ -283,7 +278,7 @@ public:
 		if (n < get_count())
 		{
 			TBLENTRY e;
-			getTableEntry(e, (UINT32)n);
+			getTableEntry(e, (uint32_t)n);
 			jumpto(e.vft);
 		}
 		return NOTHING_CHANGED;
@@ -300,7 +295,7 @@ private:
 
 
 // Locate Qt widget by class name
-static QWidget *findChildByClass(QWidgetList &wl, LPCSTR className)
+static QWidget *findChildByClass(QWidgetList &wl, const char *className)
 {
     Q_FOREACH(QWidget *w, wl)
     {
@@ -318,7 +313,7 @@ void customizeChooseWindow()
     try
     {
 		QApplication::processEvents();
-       
+
         // Mod the chooser view
         QWidgetList pl = QApplication::activeWindow()->findChildren<QWidget*>("[Class Informer]");
         if (QWidget *dw = findChildByClass(pl, "TChooser"))
@@ -342,8 +337,8 @@ void customizeChooseWindow()
             tv->horizontalHeader()->setSectionResizeMode(QHeaderView::Interactive);
 
             // Tweak the row height
-            UINT32 count = getTableCount();
-            for (UINT32 row = 0; row < count; row++)
+            uint32_t count = getTableCount();
+            for (uint32_t row = 0; row < count; row++)
                 tv->setRowHeight(row, 24);
         }
         else
@@ -362,7 +357,7 @@ bool idaapi run(size_t arg)
 		if (!auto_is_ok())
 		{
 			msg("** Class Informer: Must wait for IDA to finish processing before starting plug-in! **\n*** Aborted ***\n\n");
-			return TRUE;
+			return true;
 		}
         WaitBox::processIdaEvents();
 
@@ -371,7 +366,7 @@ bool idaapi run(size_t arg)
 
 		if (!initResourcesOnce)
 		{
-			initResourcesOnce = TRUE;
+			initResourcesOnce = true;
             QResource::registerResource(":/resources.qrc");
 
 			QFile file(QT_RES_PATH "icon.png");
@@ -384,24 +379,24 @@ bool idaapi run(size_t arg)
 
         OggPlay::endPlay();
         freeWorkingData();
-        g_optionAudioOnDone   = TRUE;
-        g_optionProcessStatic = TRUE;
-        g_optionPlaceStructs  = TRUE;
-        startingFuncCount   = (UINT32) get_func_qty();
+        g_optionAudioOnDone   = true;
+        g_optionProcessStatic = true;
+        g_optionPlaceStructs  = true;
+        startingFuncCount   = (uint32_t) get_func_qty();
         staticCppCtorCnt = staticCCtorCnt = staticCtorDtorCnt = staticCDtorCnt = 0;
         colList.clear();
 
         // Create storage netnode
-        if(!(netNode = new netnode(NETNODE_NAME, SIZESTR(NETNODE_NAME), TRUE)))
+        if(!(netNode = new netnode(NETNODE_NAME, SIZESTR(NETNODE_NAME), true)))
         {
-            _ASSERT(FALSE);
-            return TRUE;
+            _ASSERT(false);
+            return true;
         }
 
 		// Read existing storage if any
-        UINT32 tableCount   = getTableCount();
-        WORD storageVersion = getStoreVersion();
-        BOOL storageExists  = (tableCount > 0);
+        uint32_t tableCount   = getTableCount();
+        uint16_t storageVersion = getStoreVersion();
+        bool storageExists  = (tableCount > 0);
 
         // Ask if we should use storage or process again
 		if (storageExists)
@@ -410,13 +405,13 @@ bool idaapi run(size_t arg)
 			if (storageVersion != DB_FORMAT_VERSION)
 			{
 				msg("* Storage version mismatch, must rescan *\n");
-                storageExists = FALSE;
+                storageExists = false;
 			}
 			else
 				storageExists = (ask_yn(1, "TITLE Class Informer \nHIDECANCEL\nUse previously stored result?        ") == 1);
 		}
 
-        BOOL aborted = FALSE;
+        bool aborted = false;
         if(!storageExists)
         {
             newNetnodeStore();
@@ -426,11 +421,11 @@ bool idaapi run(size_t arg)
             if (cmp != COMP_MS)
             {
                 msg("** IDA reports target compiler: \"%s\"\n", get_compiler_name(cmp));
-                int iResult = ask_buttons(NULL, NULL, NULL, 0, "TITLE Class Informer\nHIDECANCEL\nIDA reports this IDB's compiler as: \"%s\" \n\nThis plug-in only understands MS Visual C++ targets.\nRunning it on other targets (like Borland© compiled, etc.) will have unpredicted results.   \n\nDo you want to continue anyhow?", get_compiler_name(cmp));
+                int iResult = ask_buttons(NULL, NULL, NULL, 0, "TITLE Class Informer\nHIDECANCEL\nIDA reports this IDB's compiler as: \"%s\" \n\nThis plug-in only understands MS Visual C++ targets.\nRunning it on other targets (like Borland compiled, etc.) will have unpredicted results.   \n\nDo you want to continue anyhow?", get_compiler_name(cmp));
                 if (iResult != 1)
                 {
                     msg("- Aborted -\n\n");
-                    return TRUE;
+                    return true;
                 }
             }
 
@@ -440,7 +435,7 @@ bool idaapi run(size_t arg)
             {
                 msg("- Canceled -\n\n");
 				freeWorkingData();
-                return TRUE;
+                return true;
             }
 
             WaitBox::show("Class Informer", "Please wait..", "url(" QT_RES_PATH "progress-style.qss)", QT_RES_PATH "icon.png");
@@ -450,10 +445,10 @@ bool idaapi run(size_t arg)
 			try
 			{
                 // Add RTTI type definitions to IDA once per session
-                static BOOL createStructsOnce = FALSE;
+                static bool createStructsOnce = false;
                 if (g_optionPlaceStructs && !createStructsOnce)
                 {
-                    createStructsOnce = TRUE;
+                    createStructsOnce = true;
                     RTTI::addDefinitionsToIda();
                 }
 
@@ -489,12 +484,12 @@ bool idaapi run(size_t arg)
                                 if (file.open(QFile::ReadOnly))
                                 {
                                     QByteArray ba = file.readAll();
-                                    OggPlay::playFromMemory((const PVOID)ba.constData(), ba.size(), TRUE);
+                                    OggPlay::playFromMemory((const void *)ba.constData(), ba.size(), true);
                                 }
                             }
                         }
 
-                        showEndStats();                       
+                        showEndStats();
                     }
                 }
 			}
@@ -505,7 +500,7 @@ bool idaapi run(size_t arg)
             if (aborted)
             {
                 msg("- Aborted -\n\n");
-                return TRUE;
+                return true;
             }
         }
 
@@ -521,7 +516,7 @@ bool idaapi run(size_t arg)
     }
 	CATCH()
 
-	return TRUE;
+	return true;
 }
 
 // Print out end stats
@@ -530,9 +525,9 @@ static void showEndStats()
     try
     {
         msg("\n-------------------------------------------------\n");
-        char buffer[32];		
+        char buffer[32];
 		msg("RTTI vftables located: %s\n", NumberCommaString(getTableCount(), buffer));
-		UINT32 functionsFixed = ((UINT32) get_func_qty() - startingFuncCount);
+		uint32_t functionsFixed = ((uint32_t) get_func_qty() - startingFuncCount);
 		if(functionsFixed)
             msg("Missing functions fixed: %s\n", NumberCommaString(functionsFixed, buffer));
 
@@ -545,11 +540,11 @@ static void showEndStats()
 // ================================================================================================
 
 // Fix/create label and comment C/C++ initializer tables
-static void setIntializerTable(ea_t start, ea_t end, BOOL isCpp)
+static void setIntializerTable(ea_t start, ea_t end, bool isCpp)
 {
     try
     {
-        if (UINT32 count = ((end - start) / plat.ptrSize))
+        if (uint32_t count = ((end - start) / plat.ptrSize))
         {
             // Set table elements as pointers
             ea_t ea = start;
@@ -569,9 +564,9 @@ static void setIntializerTable(ea_t start, ea_t end, BOOL isCpp)
             {
                 char name[MAXSTR];
                 if (isCpp)
-                    sprintf_s(name, sizeof(name), "__xc_a_%d", staticCppCtorCnt);
+                    snprintf(name, sizeof(name), "__xc_a_%d", staticCppCtorCnt);
                 else
-                    sprintf_s(name, sizeof(name), "__xi_a_%d", staticCCtorCnt);
+                    snprintf(name, sizeof(name), "__xi_a_%d", staticCCtorCnt);
                 setName(start, name);
             }
 
@@ -580,9 +575,9 @@ static void setIntializerTable(ea_t start, ea_t end, BOOL isCpp)
             {
                 char name[MAXSTR];
                 if (isCpp)
-                    sprintf_s(name, sizeof(name), "__xc_z_%d", staticCppCtorCnt);
+                    snprintf(name, sizeof(name), "__xc_z_%d", staticCppCtorCnt);
                 else
-                    sprintf_s(name, sizeof(name), "__xi_z_%d", staticCCtorCnt);
+                    snprintf(name, sizeof(name), "__xi_z_%d", staticCCtorCnt);
                 setName(end, name);
             }
 
@@ -602,14 +597,14 @@ static void setIntializerTable(ea_t start, ea_t end, BOOL isCpp)
                 if (isCpp)
                 {
 					char comment[MAXSTR];
-                    sprintf_s(comment, sizeof(comment), "%d C++ static ctors (#classinformer)", count);
-                    setComment(start, comment, TRUE);
+                    snprintf(comment, sizeof(comment), "%d C++ static ctors (#classinformer)", count);
+                    setComment(start, comment, true);
                 }
                 else
                 {
 					char comment[MAXSTR];
-                    sprintf_s(comment, sizeof(comment), "%d C initializers (#classinformer)", count);
-                    setComment(start, comment, TRUE);
+                    snprintf(comment, sizeof(comment), "%d C initializers (#classinformer)", count);
+                    setComment(start, comment, true);
                 }
             }
 
@@ -627,7 +622,7 @@ static void setTerminatorTable(ea_t start, ea_t end)
 {
     try
     {
-        if (UINT32 count = ((end - start) / plat.ptrSize))
+        if (uint32_t count = ((end - start) / plat.ptrSize))
         {
             // Set table elements as pointers
             ea_t ea = start;
@@ -647,7 +642,7 @@ static void setTerminatorTable(ea_t start, ea_t end)
             if (!hasName(start))
             {
                 char name[MAXSTR];
-                _snprintf_s(name, sizeof(name), SIZESTR(name), "__xt_a_%d", staticCDtorCnt);
+                snprintf(name, sizeof(name), "__xt_a_%d", staticCDtorCnt);
                 setName(start, name);
             }
 
@@ -655,7 +650,7 @@ static void setTerminatorTable(ea_t start, ea_t end)
             if (!hasName(end))
             {
 				char name[MAXSTR];
-                _snprintf_s(name, sizeof(name), SIZESTR(name), "__xt_z_%d", staticCDtorCnt);
+                snprintf(name, sizeof(name), "__xt_z_%d", staticCDtorCnt);
                 setName(end, name);
             }
 
@@ -668,8 +663,8 @@ static void setTerminatorTable(ea_t start, ea_t end)
             if (!hasComment(start))
             {
                 char comment[MAXSTR];
-                _snprintf_s(comment, sizeof(comment), SIZESTR(comment), "%d C terminators (#classinformer)", count);
-                setComment(start, comment, TRUE);
+                snprintf(comment, sizeof(comment), "%d C terminators (#classinformer)", count);
+                setComment(start, comment, true);
             }
 
             staticCDtorCnt++;
@@ -683,7 +678,7 @@ static void setCtorDtorTable(ea_t start, ea_t end)
 {
     try
     {
-        if (UINT32 count = ((end - start) / plat.ptrSize))
+        if (uint32_t count = ((end - start) / plat.ptrSize))
         {
             // Set table elements as pointers
             ea_t ea = start;
@@ -703,7 +698,7 @@ static void setCtorDtorTable(ea_t start, ea_t end)
             if (!hasName(start))
             {
                 char name[MAXSTR];
-                _snprintf_s(name, sizeof(name), SIZESTR(name), "__x?_a_%d", staticCtorDtorCnt);
+                snprintf(name, sizeof(name), "__x?_a_%d", staticCtorDtorCnt);
                 setName(start, name);
             }
 
@@ -711,7 +706,7 @@ static void setCtorDtorTable(ea_t start, ea_t end)
             if (!hasName(end))
             {
                 char name[MAXSTR];
-                _snprintf_s(name, sizeof(name), SIZESTR(name), "__x?_z_%d", staticCtorDtorCnt);
+                snprintf(name, sizeof(name), "__x?_z_%d", staticCtorDtorCnt);
                 setName(end, name);
             }
 
@@ -724,8 +719,8 @@ static void setCtorDtorTable(ea_t start, ea_t end)
             if (!hasComment(start))
             {
                 char comment[MAXSTR];
-                _snprintf_s(comment, sizeof(comment), SIZESTR(comment), "%d C initializers/terminators (#classinformer)", count);
-                setComment(start, comment, TRUE);
+                snprintf(comment, sizeof(comment), "%d C initializers/terminators (#classinformer)", count);
+                setComment(start, comment, true);
             }
 
             staticCtorDtorCnt++;
@@ -746,21 +741,21 @@ static void processRegisterInitterm(ea_t start, ea_t end, ea_t call)
         if ((startSeg && endSeg) && (startSeg == endSeg))
         {
             if (start > end)
-                swap_t(start, end);
+                std::swap(start, end);
 
             msg("    %llX to %llX CTOR table.\n", start, end);
-            setIntializerTable(start, end, TRUE);
+            setIntializerTable(start, end, true);
 			if(!hasComment(call))
-				setComment(call, "_initterm", TRUE);
+				setComment(call, "_initterm", true);
         }
         else
             msg("  ** Bad address range of  %llX, %llX for \"_initterm\" type ** <click address>.\n", start, end);
     }
 }
 
-static UINT32 doInittermTable(func_t *func, ea_t start, ea_t end, LPCSTR name)
+static uint32_t doInittermTable(func_t *func, ea_t start, ea_t end, const char *name)
 {
-    UINT32 found = FALSE;
+    uint32_t found = false;
 
     if ((start != BADADDR) && (end != BADADDR))
     {
@@ -770,7 +765,7 @@ static UINT32 doInittermTable(func_t *func, ea_t start, ea_t end, LPCSTR name)
         if ((startSeg && endSeg) && (startSeg == endSeg))
         {
             if (start > end)
-                swap_t(start, end);
+                std::swap(start, end);
 
             // Try to determine if we are in dtor or ctor section
             if (func)
@@ -786,8 +781,8 @@ static UINT32 doInittermTable(func_t *func, ea_t start, ea_t end, LPCSTR name)
                     if (strstr(funcName, "cinit") || strstr(funcName, "tmaincrtstartup") || strstr(funcName, "start"))
                     {
                         msg("     %llX to %llX CTOR table.\n", start, end);
-                        setIntializerTable(start, end, TRUE);
-                        found = TRUE;
+                        setIntializerTable(start, end, true);
+                        found = true;
                     }
                     else
                     // Exit/dtor function?
@@ -795,7 +790,7 @@ static UINT32 doInittermTable(func_t *func, ea_t start, ea_t end, LPCSTR name)
                     {
                         msg("     %llX to %llX DTOR table.\n", start, end);
                         setTerminatorTable(start, end);
-                        found = TRUE;
+                        found = true;
                     }
                 }
             }
@@ -805,7 +800,7 @@ static UINT32 doInittermTable(func_t *func, ea_t start, ea_t end, LPCSTR name)
                 // Fall back to generic assumption
                 msg("     %llX to %llX CTOR/DTOR table.\n", start, end);
                 setCtorDtorTable(start, end);
-                found = TRUE;
+                found = true;
             }
         }
         else
@@ -818,11 +813,11 @@ static UINT32 doInittermTable(func_t *func, ea_t start, ea_t end, LPCSTR name)
 }
 
 // Process _initterm function
-// Returns TRUE if at least one found
-static BOOL processInitterm(ea_t address, LPCSTR name)
+// Returns true if at least one found
+static bool processInitterm(ea_t address, const char *name)
 {
     msg("%llX process initterm: \"%s\" \n", address, name);
-    UINT32 count = 0;
+    uint32_t count = 0;
 
     // Walk xrefs
     ea_t xref = get_first_fcref_to(address);
@@ -852,9 +847,9 @@ static BOOL processInitterm(ea_t address, LPCSTR name)
                     break;
                 }
 
-                BOOL matched = FALSE;
-                UINT32 patternCount = (UINT32) initTermArgPatterns.size();
-                for (UINT32 i = 0; (i < patternCount) && !matched; i++)
+                bool matched = false;
+                uint32_t patternCount = (uint32_t) initTermArgPatterns.size();
+                for (uint32_t i = 0; (i < patternCount) && !matched; i++)
                 {
 					ea_t match = FIND_BINARY(instruction2, xref, initTermArgPatterns[i].pattern);
 					if (match != BADADDR)
@@ -867,44 +862,24 @@ static BOOL processInitterm(ea_t address, LPCSTR name)
                         }
                         else
                         {
-							UINT32 startOffset = get_32bit(instruction1 + initTermArgPatterns[i].start);
-							UINT32 endOffset = get_32bit(instruction2 + initTermArgPatterns[i].end);
+							uint32_t startOffset = get_32bit(instruction1 + initTermArgPatterns[i].start);
+							uint32_t endOffset = get_32bit(instruction2 + initTermArgPatterns[i].end);
 
-							start = (instruction1 + 7 + *((PINT32) &startOffset)); // TODO: 7 is hard coded instruction length, put this in arg2pat table?
-							end = (instruction2 + 7 + *((PINT32) &endOffset));
+							start = (instruction1 + 7 + *((int32_t *) &startOffset)); // TODO: 7 is hard coded instruction length, put this in arg2pat table?
+							end = (instruction2 + 7 + *((int32_t *) &endOffset));
                         }
 
 						msg("   %llX Two instruction pattern match #%d\n", match, i);
 						count += doInittermTable(func, start, end, name);
-						matched = TRUE;
+						matched = true;
 						break;
 					}
                 }
 
-                // 3 instruction
-                /*
-                searchStart = prev_head(searchStart, BADADDR);
-                if (searchStart == BADADDR)
-                    break;
-                if (func && (searchStart < func->start_ea))
-                    break;
-
-                    if (func && (searchStart < func->start_ea))
-                    {
-                        msg("   %llX arg3 outside of contained function **\n", func->start_ea);
-                        break;
-                    }
-
-                .text:10008F78                 push    offset unk_1000B1B8
-                .text:10008F7D                 push    offset unk_1000B1B0
-                .text:10008F82                 mov     dword_1000F83C, 1
-                "68 ?? ?? ?? ?? 68 ?? ?? ?? ?? C7 05 ?? ?? ?? ?? ?? ?? ?? ??"
-                */
-
                 if (!matched)
                     msg("  ** arguments not located!\n");
 
-            } while (FALSE);
+            } while (false);
         }
         else
             msg("   %llX ** \"%s\" xref is not code! **\n", xref, name);
@@ -943,7 +918,7 @@ static void cacheSegments()
         {
             if (segment_t *seg = getnseg(i))
             {
-                UINT32 type = 0;
+                uint32_t type = 0;
                 if (seg->type == SEG_DATA)
                     type |= _DATA_SEG;
                 else
@@ -997,8 +972,8 @@ const SEGMENT *FindCachedSegment(ea_t addr)
 }
 
 // Process global/static ctor & dtor tables.
-// Returns TRUE if user aborted
-static BOOL processStaticTables()
+// Returns true if user aborted
+static bool processStaticTables()
 {
     staticCppCtorCnt = staticCCtorCnt = staticCtorDtorCnt = staticCDtorCnt = 0;
 
@@ -1025,7 +1000,7 @@ static BOOL processStaticTables()
         }
 
 		// Locate _initterm() and _initterm_e() functions
-        static LPCSTR inittermNames[] = { "_initterm", "_initterm_e" };
+        static const char *inittermNames[] = { "_initterm", "_initterm_e" };
         std::map<ea_t, std::string> inittermMap;
         for (size_t i = 0; i < _countof(inittermNames); i++)
         {
@@ -1050,63 +1025,18 @@ static BOOL processStaticTables()
 			}
         }
 
-		// There are cases there there are local enumerated versions like "_initterm_0", etc., that we could handle
-		// So keeping the loop here for future expansion
-        #if 0
-        UINT32 funcCount = (UINT32) get_func_qty();
-        for (UINT32 i = 0; i < funcCount; i++)
-        {
-            if (func_t *func = getn_func(i))
-            {
-                qstring qstr;
-                if (get_long_name(&qstr, func->start_ea) > 0)
-				{
-                    char name[MAXSTR];
-                    strncpy_s(name, MAXSTR, qstr.c_str(), (MAXSTR - 1));
-
-                    int len = (int) strlen(name);
-                    if (len >= SIZESTR("_cinit"))
-                    {
-                        if (strcmp((name + (len - SIZESTR("_cinit"))), "_cinit") == 0)
-                        {
-                            // Skip stub functions
-                            if (func->size() > 16)
-                            {
-                                msg("%llX C: \"%s\", %d bytes.\n", func->start_ea, name, func->size());
-                                _ASSERT(cinitFunc == NULL);
-                                cinitFunc = func;
-                            }
-                        }
-                        else
-                        if ((len >= SIZESTR("_initterm")) && (strcmp((name + (len - SIZESTR("_initterm"))), "_initterm") == 0))
-                        {
-                            msg("%llX I: \"%s\", %d bytes.\n", func->start_ea, name, func->size());
-                            inittermMap[func->start_ea] = name;
-                        }
-                        else
-                        if ((len >= SIZESTR("_initterm_e")) && (strcmp((name + (len - SIZESTR("_initterm_e"))), "_initterm_e") == 0))
-                        {
-                            msg("%llX E: \"%s\", %d bytes.\n", func->start_ea, name, func->size());
-                            inittermMap[func->start_ea] = name;
-                        }
-                    }
-                }
-            }
-        }
-        #endif
-
 		if(WaitBox::isUpdateTime())
 			if (WaitBox::updateAndCancelCheck())
-				return(TRUE);
+				return(true);
 
         // Look for import versions
         {
-            static LPCSTR imports[] =
+            static const char *imports[] =
             {
                 "__imp__initterm", "__imp__initterm_e"
             };
 
-            for (UINT32 i = 0; i < _countof(imports); i++)
+            for (uint32_t i = 0; i < _countof(imports); i++)
             {
                 ea_t adress = get_name_ea(BADADDR, imports[i]);
                 if (adress != BADADDR)
@@ -1125,8 +1055,8 @@ static BOOL processStaticTables()
         {
             struct CREPAT
             {
-                LPCSTR pattern;
-                UINT32 start, end, call;
+                const char *pattern;
+                uint32_t start, end, call;
             } static const ALIGN(16) pat[] =
             {
                 // TODO: Add more patterns as they are located
@@ -1134,7 +1064,7 @@ static BOOL processStaticTables()
                 { "BE ?? ?? ?? ?? 8B C6 BF ?? ?? ?? ?? 3B C7 59 73 0F 8B 06 85 C0 74 02 FF D0 83 C6 04 3B F7 72 F1", 1, 8, 0x17},
             };
 
-            for (UINT32 i = 0; i < _countof(pat); i++)
+            for (uint32_t i = 0; i < _countof(pat); i++)
             {
 				ea_t match = FIND_BINARY(cinitFunc->start_ea, cinitFunc->end_ea, pat[i].pattern);
                 while (match != BADADDR)
@@ -1151,7 +1081,7 @@ static BOOL processStaticTables()
         msg(" \n");
 		if (WaitBox::isUpdateTime())
 			if (WaitBox::updateAndCancelCheck())
-				return(TRUE);
+				return(true);
 
         // Generate _initterm argument pattern table
 		if (plat.is64)
@@ -1174,23 +1104,23 @@ static BOOL processStaticTables()
             if (processInitterm(address, name.c_str()))
 				if (WaitBox::isUpdateTime())
 					if (WaitBox::updateAndCancelCheck())
-						return(TRUE);
+						return(true);
         }
 
 		if (WaitBox::isUpdateTime())
 			if (WaitBox::updateAndCancelCheck())
-				return(TRUE);
+				return(true);
     }
     CATCH()
 
-    return(FALSE);
+    return(false);
 }
 
 // ================================================================================================
 
 
-// Return TRUE if address as a anterior comment
-inline BOOL hasAnteriorComment(ea_t ea)
+// Return true if address as a anterior comment
+inline bool hasAnteriorComment(ea_t ea)
 {
     return (get_first_free_extra_cmtidx(ea, E_PREV) != E_PREV);
 }
@@ -1200,8 +1130,8 @@ void fixDword(ea_t ea)
 {
 	if (!is_dword(get_flags(ea)))
 	{
-		setUnknown(ea, sizeof(DWORD));
-		create_dword(ea, sizeof(DWORD), TRUE);
+		setUnknown(ea, sizeof(uint32_t));
+		create_dword(ea, sizeof(uint32_t), true);
         auto_wait();
 	}
 }
@@ -1214,8 +1144,8 @@ void fixEa(ea_t ea)
 		// 32bit
 		if (!is_dword(get_flags(ea)))
 		{
-			setUnknown(ea, sizeof(UINT32));
-			create_dword(ea, sizeof(UINT32), TRUE);
+			setUnknown(ea, sizeof(uint32_t));
+			create_dword(ea, sizeof(uint32_t), true);
             auto_wait();
 		}
 	}
@@ -1224,25 +1154,25 @@ void fixEa(ea_t ea)
 		// If already a QWORD size value here it's good
 		if (!is_qword(get_flags(ea)))
 		{
-			setUnknown(ea, sizeof(UINT64));
-			create_qword(ea, sizeof(UINT64), TRUE);
+			setUnknown(ea, sizeof(uint64_t));
+			create_qword(ea, sizeof(uint64_t), true);
             auto_wait();
 		}
 	}
 }
 
 // Get IDA EA bit value with verification
-BOOL getVerifyEa(ea_t ea, ea_t &rValue)
+bool getVerifyEa(ea_t ea, ea_t &rValue)
 {
 	// Location valid?
 	if (IS_VALID_ADDR(ea))
 	{
 		// Get ea_t value
 		rValue = plat.getEa(ea);
-		return TRUE;
+		return true;
 	}
 
-	return FALSE;
+	return false;
 }
 
 // Address should be a code function
@@ -1268,18 +1198,18 @@ void fixFunction(ea_t ea)
 // http://en.wikipedia.org/wiki/Name_mangling
 // http://en.wikipedia.org/wiki/Visual_C%2B%2B_name_mangling
 // http://www.agner.org/optimize/calling_conventions.pdf
-BOOL getPlainTypeName(__in LPCSTR mangled, __out_bcount(MAXSTR) LPSTR outStr)
+bool getPlainTypeName(const char *mangled, char *outStr)
 {
     outStr[0] = outStr[MAXSTR - 1] = 0;
 
-    // Use CRT function for type names
+    // Use demangler for type names
     if (mangled[0] == '.')
     {
         __unDName(outStr, mangled + 1, MAXSTR, mallocWrap, free, (UNDNAME_32_BIT_DECODE | UNDNAME_TYPE_ONLY | UNDNAME_NO_ECSU));
         if ((outStr[0] == 0) || (strcmp((mangled + 1), outStr) == 0))
         {
             msg("** getPlainClassName:__unDName() failed to unmangle! input: \"%s\"\n", mangled);
-            return FALSE;
+            return false;
         }
     }
     else
@@ -1290,29 +1220,29 @@ BOOL getPlainTypeName(__in LPCSTR mangled, __out_bcount(MAXSTR) LPSTR outStr)
         if (result < 0)
         {
             //msg("** getPlainClassName:demangle_name2() failed to unmangle! result: %d, input: \"%s\"\n", result, mangled);
-            return FALSE;
+            return false;
         }
 
         // No inhibit flags will drop this
         strncpy_s(outStr, MAXSTR, qstr.c_str(), (MAXSTR - 1));
-        if (LPSTR ending = strstr(outStr, "::`vftable'"))
+        if (char *ending = strstr(outStr, "::`vftable'"))
             *ending = 0;
     }
 
-    return TRUE;
+    return true;
 }
 
 
 // Set name for address
-void setName(ea_t ea, __in LPCSTR name)
-{	
+void setName(ea_t ea, const char *name)
+{
 	set_name(ea, name, (SN_NON_AUTO | SN_NOWARN | SN_NOCHECK | SN_FORCE));
     //msg("setName: %llX \"%s\"\n", ea, name);
 }
 
 // Set comment at address
-void setComment(ea_t ea, LPCSTR comment, BOOL rptble)
-{	
+void setComment(ea_t ea, const char *comment, bool rptble)
+{
 	set_cmt(ea, comment, rptble);
     //msg("setComment: %llX \"%s\"\n", ea, comment);
 }
@@ -1323,19 +1253,19 @@ void setAnteriorComment(ea_t ea, const char *format, ...)
 	va_list va;
 	va_start(va, format);
 	vadd_extra_line(ea, 0, format, va);
-	va_end(va);    
+	va_end(va);
     //msg("setAnteriorComment: %llX\n", ea);
 }
 
 
 // Scan segment for COLs
-static BOOL scanSeg4Cols(segment_t *seg)
+static bool scanSeg4Cols(segment_t *seg)
 {
 	qstring name;
     if (get_segm_name(&name, seg) <= 0)
 		name = "???";
     msg("N: \"%s\", %llX - %llX, S: %s.\n", name.c_str(), seg->start_ea, seg->end_ea, byteSizeString(seg->size()));
-    UINT32 newCount = 0, existingCount = 0;
+    uint32_t newCount = 0, existingCount = 0;
     WaitBox::processIdaEvents();
 
     size_t colSize = (plat.is64 ? sizeof(RTTI::_RTTICompleteObjectLocator_64) : sizeof(RTTI::_RTTICompleteObjectLocator_32));
@@ -1402,25 +1332,25 @@ static BOOL scanSeg4Cols(segment_t *seg)
                     else
                     {
                         // TODO: Should we check stray BCDs?
-                        // Each value would have to be tested for a valid type_def and the pattern is pretty ambiguous.                      
+                        // Each value would have to be tested for a valid type_def and the pattern is pretty ambiguous.
                     }
                 }
                 else
                 {
-					if (colSet.find(ptr) != colSet.end())					
-						existingCount++;				
+					if (colSet.find(ptr) != colSet.end())
+						existingCount++;
                 }
             }
 
             if(ptr % 1000)
                 if (WaitBox::isUpdateTime())
                     if (WaitBox::updateAndCancelCheck())
-                        return TRUE;
+                        return true;
 
             ptr += (ea_t) plat.ptrSize;
         }
     }
-    
+
     if (newCount)
     {
         char numBuffer[32];
@@ -1431,11 +1361,11 @@ static BOOL scanSeg4Cols(segment_t *seg)
 		char numBuffer[32];
 		msg(" Existing: %s\n", NumberCommaString(existingCount, numBuffer));
 	}
-    return FALSE;
+    return false;
 }
 
 // Locate COL by descriptor list
-static BOOL findCols(SegSelect::segments &segs)
+static bool findCols(SegSelect::segments &segs)
 {
     try
     {
@@ -1446,7 +1376,7 @@ static BOOL findCols(SegSelect::segments &segs)
             for (auto &seg: segs)
 			{
 				if (scanSeg4Cols(&seg))
-					return FALSE;
+					return false;
 			}
 		}
 		else
@@ -1459,7 +1389,7 @@ static BOOL findCols(SegSelect::segments &segs)
 					if (seg->type == SEG_DATA)
 					{
 						if (scanSeg4Cols(seg))
-							return FALSE;
+							return false;
 					}
 				}
 			}
@@ -1475,21 +1405,21 @@ static BOOL findCols(SegSelect::segments &segs)
         colList.clear();
     }
     CATCH()
-    return FALSE;
+    return false;
 }
 
 
 // Locate virtual function tables (vftable)
-static BOOL scanSeg4Vftables(segment_t *seg)
+static bool scanSeg4Vftables(segment_t *seg)
 {
 	qstring name;
 	if (get_segm_name(&name, seg) <= 0)
 		name = "???";
 	msg("N: \"%s\", %llX - %llX, S: %s.\n", name.c_str(), seg->start_ea, seg->end_ea, byteSizeString(seg->size()));
-    UINT32 foundCount = 0;
+    uint32_t foundCount = 0;
     WaitBox::processIdaEvents();
 
-    if (seg->size() >= plat.ptrSize)
+    if (seg->size() >= (asize_t)plat.ptrSize)
     {
         // The default for vftable alignment is native pointer size
         ea_t startEA = ((seg->start_ea + plat.ptrSize) & ~((ea_t) plat.ptrSize - 1));
@@ -1509,7 +1439,7 @@ static BOOL scanSeg4Vftables(segment_t *seg)
                 if (vftSet.find(vfptr) != vftSet.end())
                 {
                     // Yes, process it now
-                    RTTI::processVftable(vfptr, colEa, TRUE);
+                    RTTI::processVftable(vfptr, colEa, true);
                     foundCount++;
                 }
                 else
@@ -1520,7 +1450,7 @@ static BOOL scanSeg4Vftables(segment_t *seg)
                     if (methodSeg && (methodSeg->type & _CODE_SEG))
                     {
                         // Yes, see if vftable here
-                        foundCount += (UINT32) RTTI::processVftable(vfptr, colEa);
+                        foundCount += (uint32_t) RTTI::processVftable(vfptr, colEa);
                     }
                 }
             }
@@ -1528,7 +1458,7 @@ static BOOL scanSeg4Vftables(segment_t *seg)
             if(ptr % 1000)
                 if (WaitBox::isUpdateTime())
                     if (WaitBox::updateAndCancelCheck())
-                        return TRUE;
+                        return true;
         }
     }
 
@@ -1536,11 +1466,11 @@ static BOOL scanSeg4Vftables(segment_t *seg)
 	{
 		char numBuffer[32];
 		msg(" Found: %s\n", NumberCommaString(foundCount, numBuffer));
-	}	
-    return FALSE;
+	}
+    return false;
 }
 
-static BOOL findVftables(SegSelect::segments &segs)
+static bool findVftables(SegSelect::segments &segs)
 {
     try
     {
@@ -1552,7 +1482,7 @@ static BOOL findVftables(SegSelect::segments &segs)
             for (auto &seg: segs)
 			{
 				if (scanSeg4Vftables(&seg))
-					return FALSE;
+					return false;
 			}
 		}
 		else
@@ -1566,7 +1496,7 @@ static BOOL findVftables(SegSelect::segments &segs)
 					if (seg->type == SEG_DATA)
 					{
 						if (scanSeg4Vftables(seg))
-							return FALSE;
+							return false;
 					}
 				}
 			}
@@ -1576,14 +1506,14 @@ static BOOL findVftables(SegSelect::segments &segs)
         WaitBox::processIdaEvents();
     }
     CATCH()
-    return FALSE;
+    return false;
 }
 
 
 // ================================================================================================
 
 // Gather RTTI data set
-static BOOL gatherRttiDataSet(SegSelect::segments &segs)
+static bool gatherRttiDataSet(SegSelect::segments &segs)
 {
     // Free RTTI working data on return
     struct OnReturn  { ~OnReturn(){	RTTI::freeWorkingData(); };} onReturn;
@@ -1595,25 +1525,25 @@ static BOOL gatherRttiDataSet(SegSelect::segments &segs)
         msg("-------------------------------------------------\n");
         WaitBox::processIdaEvents();
         if(RTTI::gatherKnownRttiData())
-            return TRUE;
+            return true;
 
         // ==== Find and process Complete Object Locators (COL)
         msg("\nScanning for for Complete Object Locators:\n");
 		msg("-------------------------------------------------\n");
         WaitBox::processIdaEvents();
         if(findCols(segs))
-            return TRUE;
+            return true;
 
         // ==== Find and process vftables
         msg("\nScanning for Virtual Function Tables:\n");
 		msg("-------------------------------------------------\n");
         WaitBox::processIdaEvents();
         if(findVftables(segs))
-			return TRUE;
+			return true;
     }
     CATCH()
 
-    return FALSE;
+    return false;
 }
 
 
@@ -1624,7 +1554,10 @@ static char _help[] = "";
 static char _name[] = "ClassInformer";
 
 // Plug-in description block
-__declspec(dllexport) plugin_t PLUGIN =
+#ifdef _MSC_VER
+__declspec(dllexport)
+#endif
+plugin_t PLUGIN =
 {
 	IDP_INTERFACE_VERSION,	// IDA version plug-in is written for
     PLUGIN_PROC,        // Plug-in flags

@@ -1,30 +1,29 @@
 
 // Run-Time Type Information (RTTI) support
-#include "stdafx.h"
+#include "StdAfx.h"
 #include "Main.h"
 #include "RTTI.h"
 #include "Vftable.h"
-#include <WaitBoxEx.h>
 
 // const Name::`vftable'
-static LPCSTR FORMAT_RTTI_VFTABLE_PREFIX = "??_7";
-static LPCSTR FORMAT_RTTI_VFTABLE = "??_7%s6B@";
+static const char *FORMAT_RTTI_VFTABLE_PREFIX = "??_7";
+static const char *FORMAT_RTTI_VFTABLE ="??_7%s6B@";
 
 // type 'RTTI Type Descriptor'
-static LPCSTR FORMAT_RTTI_TYPE = "??_R0?%s@8";
+static const char * FORMAT_RTTI_TYPE = "??_R0?%s@8";
 
 // 'RTTI Base Class Descriptor at (a,b,c,d)'
-static LPCSTR FORMAT_RTTI_BCD = "??_R1%s%s%s%s%s8";
+static const char * FORMAT_RTTI_BCD = "??_R1%s%s%s%s%s8";
 
 // `RTTI Base Class Array'
-static LPCSTR FORMAT_RTTI_BCA = "??_R2%s8";
+static const char * FORMAT_RTTI_BCA = "??_R2%s8";
 
 // 'RTTI Class Hierarchy Descriptor'
-static LPCSTR FORMAT_RTTI_CHD = "??_R3%s8";
+static const char * FORMAT_RTTI_CHD = "??_R3%s8";
 
 // 'RTTI Complete Object Locator'
-static LPCSTR FORMAT_RTTI_COL_PREFIX = "??_R4";
-static LPCSTR FORMAT_RTTI_COL = "??_R4%s6B@";
+static const char * FORMAT_RTTI_COL_PREFIX = "??_R4";
+static const char * FORMAT_RTTI_COL = "??_R4%s6B@";
 
 // Skip type_info tag for class/struct mangled name strings
 #define SKIP_TD_TAG(_str) ((_str) + SIZESTR(".?Ax"))
@@ -33,7 +32,7 @@ static LPCSTR FORMAT_RTTI_COL = "??_R4%s6B@";
 struct bcdInfo
 {
     char m_name[MAXSTR];
-    UINT32 m_attribute;
+    uint32_t m_attribute;
 	RTTI::PMD m_pmd;
 };
 typedef std::vector<bcdInfo> bcdList;
@@ -50,11 +49,11 @@ eaSet colSet;    // _RTTICompleteObjectLocator "Complete Object Locator" (COL) s
 eaSet superSet;  // Combined for faster scanning
 
 #define IN_SUPER(_addr) (superSet.find(_addr) != superSet.end())
-#define TO_INT64(_uint32) ((INT64) *((PINT32) &_uint32))
+// TO_INT64 defined in Compat.h
 
 namespace RTTI
 {
-    void getBCDInfo(ea_t col, __out bcdList& nameList, __out UINT32& numBaseClasses);
+    void getBCDInfo(ea_t col, bcdList& nameList, uint32_t& numBaseClasses);
 };
 
 void RTTI::freeWorkingData()
@@ -69,7 +68,7 @@ void RTTI::freeWorkingData()
 }
 
 // Make a mangled number string for labeling
-static LPSTR mangleNumber(UINT32 number, __out_bcount(64) LPSTR buffer)
+static char * mangleNumber(uint32_t number, char * buffer)
 {
 	//
 	// 0 = A@
@@ -78,7 +77,7 @@ static LPSTR mangleNumber(UINT32 number, __out_bcount(64) LPSTR buffer)
 	// 0x0..0xF = 'A'..'P'
 
 	// Can only get unsigned inputs
-	int num = *((PINT32) &number);
+	int num = *((int32_t*) &number);
     if (num == 0)
         return strcpy(buffer, "A@");
 	else
@@ -120,7 +119,7 @@ static LPSTR mangleNumber(UINT32 number, __out_bcount(64) LPSTR buffer)
 
 // Return a short label indicating the CHD inheritance type by attributes
 // TODO: Consider CHD_AMBIGUOUS?
-static LPCSTR attributeLabel(UINT32 attributes)
+static const char * attributeLabel(uint32_t attributes)
 {
     switch (attributes & 3)
     {
@@ -147,7 +146,7 @@ static void typeDump(tinfo_t &tinf)
 }
 
 // Look for existing type from a list of names
-static tid_t GetKnownTypeID(LPCSTR names[], int namesCount, asize_t expectedTypeSize)
+static tid_t GetKnownTypeID(const char * names[], int namesCount, asize_t expectedTypeSize)
 {
 	for (int i = 0; i < namesCount; i++)
 	{
@@ -177,7 +176,7 @@ static tid_t GetKnownTypeID(LPCSTR names[], int namesCount, asize_t expectedType
 void RTTI::addDefinitionsToIda()
 {
     // std::type_info, aka "_TypeDescriptor" and "_RTTITypeDescriptor" in CRT source, class representation
-    static LPCSTR type_info_names[] =
+    static const char * type_info_names[] =
     {
         "type_info",
         "??_Rtype_info_std@@3Vtype_info@@A", /*std::type_info*/
@@ -192,7 +191,7 @@ void RTTI::addDefinitionsToIda()
     // Not found so create it
 	if (s_type_info_ID == BADADDR)
 	{
-		LPCSTR def = R"DEF(
+		const char * def = R"DEF(
             // RTTI std::type_info class (#classinformer)
             struct type_info
             {
@@ -220,11 +219,11 @@ void RTTI::addDefinitionsToIda()
 	}
 
     // PDM
-	static LPCSTR pdm_names[] =	{ "_PDM", "PDM" };
+	static const char * pdm_names[] =	{ "_PDM", "PDM" };
     s_PMD_ID = GetKnownTypeID(pdm_names, _countof(pdm_names), sizeof(PMD));
 	if (s_PMD_ID == BADADDR)
 	{
-		LPCSTR def = R"DEF(
+		const char * def = R"DEF(
             // RTTI Base class descriptor displacement container (#classinformer)
             struct PMD
             {
@@ -244,11 +243,11 @@ void RTTI::addDefinitionsToIda()
 	}
 
     // _RTTIClassHierarchyDescriptor
-	static LPCSTR chd_names[] = { "_s__RTTIClassHierarchyDescriptor",	"__RTTIClassHierarchyDescriptor", "_RTTIClassHierarchyDescriptor", "RTTIClassHierarchyDescriptor" };
-    s_ClassHierarchyDescriptor_ID = GetKnownTypeID(chd_names, _countof(chd_names), (sizeof(_RTTIClassHierarchyDescriptor) + (plat.is64 ? sizeof(UINT32) : 0))); // The 64bit one in the CRT source shows it's a pointer while it's an int offset in binary
+	static const char * chd_names[] = { "_s__RTTIClassHierarchyDescriptor",	"__RTTIClassHierarchyDescriptor", "_RTTIClassHierarchyDescriptor", "RTTIClassHierarchyDescriptor" };
+    s_ClassHierarchyDescriptor_ID = GetKnownTypeID(chd_names, _countof(chd_names), (sizeof(_RTTIClassHierarchyDescriptor) + (plat.is64 ? sizeof(uint32_t) : 0))); // The 64bit one in the CRT source shows it's a pointer while it's an int offset in binary
     if (s_ClassHierarchyDescriptor_ID == BADADDR)
     {
-        LPCSTR def;
+        const char * def;
         if (!plat.is64)
         {
             // 32bit
@@ -288,11 +287,11 @@ void RTTI::addDefinitionsToIda()
     }
 
     // _RTTIBaseClassDescriptor
-	static LPCSTR bcd_names[] = { "_s__RTTIBaseClassDescriptor", "__RTTIBaseClassDescriptor", "_RTTIBaseClassDescriptor", "RTTIBaseClassDescriptor" };
-    s_BaseClassDescriptor_ID = GetKnownTypeID(bcd_names, _countof(bcd_names), (sizeof(_RTTIBaseClassDescriptor) + (plat.is64 ? sizeof(UINT64) : 0)));
+	static const char * bcd_names[] = { "_s__RTTIBaseClassDescriptor", "__RTTIBaseClassDescriptor", "_RTTIBaseClassDescriptor", "RTTIBaseClassDescriptor" };
+    s_BaseClassDescriptor_ID = GetKnownTypeID(bcd_names, _countof(bcd_names), (sizeof(_RTTIBaseClassDescriptor) + (plat.is64 ? sizeof(uint64_t) : 0)));
     if (s_BaseClassDescriptor_ID == BADADDR)
     {
-		LPCSTR def;
+		const char * def;
         if (!plat.is64)
         {
 			// 32bit
@@ -334,11 +333,11 @@ void RTTI::addDefinitionsToIda()
     }
 
     // _RTTICompleteObjectLocator
-    static LPCSTR col_names[] = { "_s__RTTICompleteObjectLocator2", "_s__RTTICompleteObjectLocator", "__RTTICompleteObjectLocator", "_RTTICompleteObjectLocator", "RTTICompleteObjectLocator" };
+    static const char * col_names[] = { "_s__RTTICompleteObjectLocator2", "_s__RTTICompleteObjectLocator", "__RTTICompleteObjectLocator", "_RTTICompleteObjectLocator", "RTTICompleteObjectLocator" };
     s_CompleteObjectLocator_ID = GetKnownTypeID(col_names, _countof(col_names), (sizeof(_RTTICompleteObjectLocator) + (plat.is64 ? 16 : 0)));
     if (s_CompleteObjectLocator_ID == BADADDR)
     {
-		LPCSTR def;
+		const char * def;
 		if (!plat.is64)
 		{
 			// 32bit
@@ -383,17 +382,17 @@ void RTTI::addDefinitionsToIda()
 
 
 // Place an RTTI structure by type ID add address w/optional name
-// Returns TRUE if structure was placed, else FLASE it was already set
-static BOOL tryStructRTTI(ea_t ea, tid_t tid, __in_opt LPSTR typeName = NULL, BOOL bHasChd = FALSE)
+// Returns true if structure was placed, else FLASE it was already set
+static bool tryStructRTTI(ea_t ea, tid_t tid, char * typeName = NULL, bool bHasChd = false)
 {
     if (tid == BADADDR)
     {
-        _ASSERT(FALSE);
-        return FALSE;
+        _ASSERT(false);
+        return false;
     }
 
-    #define put32(ea) create_dword(ea, sizeof(EA_32), TRUE)
-    #define put64(ea) create_qword(ea, sizeof(ea_t), TRUE)
+    #define put32(ea) create_dword(ea, sizeof(EA_32), true)
+    #define put64(ea) create_qword(ea, sizeof(ea_t), true)
 
     // type_info
 	if(tid == s_type_info_ID)
@@ -404,12 +403,12 @@ static BOOL tryStructRTTI(ea_t ea, tid_t tid, __in_opt LPSTR typeName = NULL, BO
             if (!hasName(ea))
             {
                 _ASSERT(typeName != NULL);
-                UINT32 nameLen = (UINT32) (strlen(typeName) + 1);
-                UINT32 structSize = (offsetof(RTTI::type_info_32, _M_d_name) + nameLen);
+                uint32_t nameLen = (uint32_t) (strlen(typeName) + 1);
+                uint32_t structSize = (offsetof(RTTI::type_info_32, _M_d_name) + nameLen);
 
                 // Place struct
                 setUnknown(ea, structSize);
-                BOOL result = FALSE;
+                bool result = false;
                 if (g_optionPlaceStructs)
                     result = create_struct(ea, structSize, s_type_info_ID);
                 if (!result)
@@ -425,7 +424,7 @@ static BOOL tryStructRTTI(ea_t ea, tid_t tid, __in_opt LPSTR typeName = NULL, BO
                 if (end % 4)
                     create_align(end, (4 - (end % 4)), 0);
 
-                return TRUE;
+                return true;
             }
         }
         else
@@ -434,12 +433,12 @@ static BOOL tryStructRTTI(ea_t ea, tid_t tid, __in_opt LPSTR typeName = NULL, BO
             if (!hasName(ea))
             {
                 _ASSERT(typeName != NULL);
-                UINT32 nameLen = (UINT32) (strlen(typeName) + 1);
-                UINT32 structSize = (offsetof(RTTI::type_info_64, _M_d_name) + nameLen);
+                uint32_t nameLen = (uint32_t) (strlen(typeName) + 1);
+                uint32_t structSize = (offsetof(RTTI::type_info_64, _M_d_name) + nameLen);
 
                 // Place struct
                 setUnknown(ea, structSize);
-                BOOL result = FALSE;
+                bool result = false;
                 if (g_optionPlaceStructs && (s_type_info_ID > 5))
                     result = create_struct(ea, structSize, s_type_info_ID);
                 if (!result)
@@ -450,16 +449,16 @@ static BOOL tryStructRTTI(ea_t ea, tid_t tid, __in_opt LPSTR typeName = NULL, BO
                 }
 
                 // sh!ft: End should be aligned
-             #pragma message(__LOC2__ "  >> Should be align 8? Do we really even need this?")
+             // TODO: Should be align 8?
                 ea_t end = (ea + offsetof(RTTI::type_info_64, _M_d_name) + nameLen);
                 if (end % 4)
                     create_align(end, (4 - (end % 4)), 0);
 
-                return TRUE;
+                return true;
             }
         }
 
-        return FALSE;
+        return false;
 	}
 
     // _RTTIClassHierarchyDescriptor
@@ -468,7 +467,7 @@ static BOOL tryStructRTTI(ea_t ea, tid_t tid, __in_opt LPSTR typeName = NULL, BO
 		if (!hasName(ea))
 		{
 			setUnknown(ea, sizeof(RTTI::_RTTIClassHierarchyDescriptor));
-			BOOL result = FALSE;
+			bool result = false;
 			if (g_optionPlaceStructs)
 				result = create_struct(ea, sizeof(RTTI::_RTTIClassHierarchyDescriptor), s_ClassHierarchyDescriptor_ID);
 			if (!result)
@@ -479,10 +478,10 @@ static BOOL tryStructRTTI(ea_t ea, tid_t tid, __in_opt LPSTR typeName = NULL, BO
 				put32(ea + offsetof(RTTI::_RTTIClassHierarchyDescriptor, baseClassArray));
 			}
 
-			return TRUE;
+			return true;
 		}
 
-        return FALSE;
+        return false;
 	}
 
     // PMD
@@ -491,7 +490,7 @@ static BOOL tryStructRTTI(ea_t ea, tid_t tid, __in_opt LPSTR typeName = NULL, BO
 		if (!hasName(ea))
 		{
 			setUnknown(ea, sizeof(RTTI::PMD));
-			BOOL result = FALSE;
+			bool result = false;
 			if (g_optionPlaceStructs)
 				result = create_struct(ea, sizeof(RTTI::PMD), s_PMD_ID);
 			if (!result)
@@ -501,10 +500,10 @@ static BOOL tryStructRTTI(ea_t ea, tid_t tid, __in_opt LPSTR typeName = NULL, BO
                 put32(ea + offsetof(RTTI::PMD, vdisp));
 			}
 
-			return TRUE;
+			return true;
 		}
 
-        return FALSE;
+        return false;
 	}
 
 	// _RTTICompleteObjectLocator
@@ -516,7 +515,7 @@ static BOOL tryStructRTTI(ea_t ea, tid_t tid, __in_opt LPSTR typeName = NULL, BO
             if (!hasName(ea))
             {
                 setUnknown(ea, sizeof(RTTI::_RTTICompleteObjectLocator_32));
-                BOOL result = FALSE;
+                bool result = false;
                 if (g_optionPlaceStructs)
                     result = create_struct(ea, sizeof(RTTI::_RTTICompleteObjectLocator_32), s_CompleteObjectLocator_ID);
                 if (!result)
@@ -528,7 +527,7 @@ static BOOL tryStructRTTI(ea_t ea, tid_t tid, __in_opt LPSTR typeName = NULL, BO
                     put32(ea + offsetof(RTTI::_RTTICompleteObjectLocator_32, classDescriptor));
                 }
 
-                return TRUE;
+                return true;
             }
         }
         else
@@ -537,7 +536,7 @@ static BOOL tryStructRTTI(ea_t ea, tid_t tid, __in_opt LPSTR typeName = NULL, BO
 			if (!hasName(ea))
 			{
 				setUnknown(ea, sizeof(RTTI::_RTTICompleteObjectLocator_64));
-				BOOL result = FALSE;
+				bool result = false;
 				if (g_optionPlaceStructs)
 					result = create_struct(ea, sizeof(RTTI::_RTTICompleteObjectLocator_64), s_CompleteObjectLocator_ID);
 				if (!result)
@@ -550,11 +549,11 @@ static BOOL tryStructRTTI(ea_t ea, tid_t tid, __in_opt LPSTR typeName = NULL, BO
 					put32(ea + offsetof(RTTI::_RTTICompleteObjectLocator_64, objectBase));
 				}
 
-				return TRUE;
+				return true;
 			}
         }
 
-        return FALSE;
+        return false;
 	}
 
 	// _RTTIBaseClassDescriptor
@@ -567,7 +566,7 @@ static BOOL tryStructRTTI(ea_t ea, tid_t tid, __in_opt LPSTR typeName = NULL, BO
         if (!hasName(ea))
         {
             setUnknown(ea, sizeof(RTTI::_RTTIBaseClassDescriptor));
-            BOOL result = FALSE;
+            bool result = false;
             if (g_optionPlaceStructs)
                 result = create_struct(ea, sizeof(RTTI::_RTTIBaseClassDescriptor), s_BaseClassDescriptor_ID);
             if (!result)
@@ -578,22 +577,22 @@ static BOOL tryStructRTTI(ea_t ea, tid_t tid, __in_opt LPSTR typeName = NULL, BO
                 //if (bHasChd)
                 put32(ea + offsetof(RTTI::_RTTIBaseClassDescriptor, classDescriptor));
                 if (bHasChd)
-                    setComment((ea + offsetof(RTTI::_RTTIBaseClassDescriptor, classDescriptor)), "BCD_HASPCHD set", TRUE);
+                    setComment((ea + offsetof(RTTI::_RTTIBaseClassDescriptor, classDescriptor)), "BCD_HASPCHD set", true);
             }
 
-            return TRUE;
+            return true;
         }
 
-        return FALSE;
+        return false;
 	}
 
-	_ASSERT(FALSE);
-	return FALSE;
+	_ASSERT(false);
+	return false;
 }
 
 
 // Read ASCII string from IDB at address
-static int getIdaString(ea_t ea, __out LPSTR buffer, int bufferSize)
+static int getIdaString(ea_t ea, char * buffer, int bufferSize)
 {
 	buffer[0] = 0;
 
@@ -601,7 +600,7 @@ static int getIdaString(ea_t ea, __out LPSTR buffer, int bufferSize)
     auto it = stringCache.find(ea);
     if (it != stringCache.end())
     {
-        LPCSTR str = it->second.c_str();
+        const char * str = it->second.c_str();
         int len = (int) strlen(str);
         if (len > bufferSize)
 			len = bufferSize;
@@ -644,17 +643,17 @@ static int getIdaString(ea_t ea, __out LPSTR buffer, int bufferSize)
 
 // Get type name into a buffer
 // type_info assumed to be valid
-int RTTI::type_info::getName(ea_t typeInfo, __out LPSTR buffer, int bufferSize)
+int RTTI::type_info::getName(ea_t typeInfo, char * buffer, int bufferSize)
 {
     return getIdaString(typeInfo + (plat.is64 ? offsetof(type_info_64, _M_d_name) : offsetof(type_info_32, _M_d_name)), buffer, bufferSize);
 }
 
 // A valid type_info/TypeDescriptor at pointer?
-BOOL RTTI::type_info::isValid(ea_t typeInfo)
+bool RTTI::type_info::isValid(ea_t typeInfo)
 {
-    // TRUE if we've already seen it
+    // true if we've already seen it
     if (tdSet.find(typeInfo) != tdSet.end())
-        return TRUE;
+        return true;
 
     if (IS_VALID_ADDR(typeInfo))
 	{
@@ -672,11 +671,11 @@ BOOL RTTI::type_info::isValid(ea_t typeInfo)
 		}
 	}
 
-	return FALSE;
+	return false;
 }
 //
-// Returns TRUE if known typename at address
-BOOL RTTI::type_info::isTypeName(ea_t name)
+// Returns true if known typename at address
+bool RTTI::type_info::isTypeName(ea_t name)
 {
     // Should start with a period
     if (get_byte(name) == '.')
@@ -686,14 +685,14 @@ BOOL RTTI::type_info::isTypeName(ea_t name)
         if (getIdaString(name, buffer, SIZESTR(buffer)))
         {
             // Should be valid if it properly demangles
-            if (LPSTR s = __unDName(NULL, buffer+1 /*skip the '.'*/, 0, mallocWrap, free, (UNDNAME_32_BIT_DECODE | UNDNAME_TYPE_ONLY)))
+            if (char * s = __unDName(NULL, buffer+1 /*skip the '.'*/, 0, mallocWrap, free, (UNDNAME_32_BIT_DECODE | UNDNAME_TYPE_ONLY)))
             {
                 free(s);
-                return TRUE;
+                return true;
             }
         }
     }
-    return FALSE;
+    return false;
 }
 
 // Put struct and place name at address
@@ -724,23 +723,23 @@ void RTTI::type_info::tryStruct(ea_t typeInfo)
 	}
 	else
 	{
-		_ASSERT(FALSE);
+		_ASSERT(false);
 	}
 }
 
 // --------------------------- Complete Object Locator ---------------------------
 
-// Return TRUE if address is a valid RTTI structure
-BOOL RTTI::_RTTICompleteObjectLocator::isValid(ea_t col)
+// Return true if address is a valid RTTI structure
+bool RTTI::_RTTICompleteObjectLocator::isValid(ea_t col)
 {
     // True if already known
     if (colSet.find(col) != colSet.end())
-        return TRUE;
+        return true;
 
     if (IS_VALID_ADDR(col))
     {
         // Check signature
-        UINT32 signature = -1;
+        uint32_t signature = -1;
         if (getVerify32((col + offsetof(_RTTICompleteObjectLocator, signature)), signature))
         {
             if (!plat.is64)
@@ -756,7 +755,7 @@ BOOL RTTI::_RTTICompleteObjectLocator::isValid(ea_t col)
                         if (_RTTIClassHierarchyDescriptor::isValid(classDescriptor))
                         {
                             //msg("%llX %llX %llX\n", col, typeInfo, classDescriptor);
-                            return TRUE;
+                            return true;
                         }
                     }
                 }
@@ -767,19 +766,19 @@ BOOL RTTI::_RTTICompleteObjectLocator::isValid(ea_t col)
 				if (signature == 1)
 				{
 					// TODO: Can any of these be zero and still be valid?
-					UINT32 objectLocator32 = get_32bit(col + offsetof(_RTTICompleteObjectLocator_64, objectBase));
-                    INT64 objectLocator64 = TO_INT64(objectLocator32);
+					uint32_t objectLocator32 = get_32bit(col + offsetof(_RTTICompleteObjectLocator_64, objectBase));
+                    int64_t objectLocator64 = TO_INT64(objectLocator32);
 					if (objectLocator64 != 0)
 					{
-						UINT32 tdOffset32 = get_32bit(col + offsetof(_RTTICompleteObjectLocator_64, typeDescriptor));
-                        INT64 tdOffset64 = TO_INT64(tdOffset32);
+						uint32_t tdOffset32 = get_32bit(col + offsetof(_RTTICompleteObjectLocator_64, typeDescriptor));
+                        int64_t tdOffset64 = TO_INT64(tdOffset32);
 						if (tdOffset64 != 0)
 						{
-							UINT32 cdOffset32 = get_32bit(col + offsetof(_RTTICompleteObjectLocator_64, classDescriptor));
-                            INT64 cdOffset64 = TO_INT64(cdOffset32);
+							uint32_t cdOffset32 = get_32bit(col + offsetof(_RTTICompleteObjectLocator_64, classDescriptor));
+                            int64_t cdOffset64 = TO_INT64(cdOffset32);
 							if (cdOffset64 != 0)
 							{
-								INT64 colBase64 = ((INT64) col - objectLocator64);
+								int64_t colBase64 = ((int64_t) col - objectLocator64);
 								ea_t typeInfo = (ea_t) (colBase64 + tdOffset64);
 								if (type_info_64::isValid(typeInfo))
 								{
@@ -787,7 +786,7 @@ BOOL RTTI::_RTTICompleteObjectLocator::isValid(ea_t col)
 									if (_RTTIClassHierarchyDescriptor::isValid(classDescriptor, colBase64))
 									{
 										//msg("%llX %llX %llX\n", col, typeInfo, classDescriptor);
-										return TRUE;
+										return true;
 									}
 								}
 							}
@@ -798,18 +797,18 @@ BOOL RTTI::_RTTICompleteObjectLocator::isValid(ea_t col)
 		}
 	}
 
-	return FALSE;
+	return false;
 }
 
 // Same as above but from an already validated type_info perspective
-BOOL RTTI::_RTTICompleteObjectLocator_32::isValid2(ea_t col)
+bool RTTI::_RTTICompleteObjectLocator_32::isValid2(ea_t col)
 {
 	// True if already known
 	if (colSet.find(col) != colSet.end())
-		return TRUE;
+		return true;
 
     // 'signature' should be zero
-    UINT32 signature = -1;
+    uint32_t signature = -1;
     if (getVerify32((col + offsetof(_RTTICompleteObjectLocator_32, signature)), signature))
     {
         if (signature == 0)
@@ -821,15 +820,15 @@ BOOL RTTI::_RTTICompleteObjectLocator_32::isValid2(ea_t col)
         }
     }
 
-    return FALSE;
+    return false;
 }
 
 // Place full COL hierarchy structures if they don't already exist
-BOOL RTTI::_RTTICompleteObjectLocator::tryStruct(ea_t col)
+bool RTTI::_RTTICompleteObjectLocator::tryStruct(ea_t col)
 {
 	// Place it once
 	if (colSet.find(col) != colSet.end())
-		return TRUE;
+		return true;
 
 	// If it doesn't have a name, IDA's analyzer missed it
 	if (!hasName(col))
@@ -856,14 +855,14 @@ BOOL RTTI::_RTTICompleteObjectLocator::tryStruct(ea_t col)
         else
         {
             // 64bit offsets plus objectBase
-			UINT32 tdOffset32 = get_32bit(col + offsetof(_RTTICompleteObjectLocator_64, typeDescriptor));
-            INT64 tdOffset64 = TO_INT64(tdOffset32);	 
-			UINT32 cdOffset32 = get_32bit(col + offsetof(_RTTICompleteObjectLocator_64, classDescriptor));
-            INT64 cdOffset64 = TO_INT64(cdOffset32);
-			UINT32 objectLocator32 = get_32bit(col + offsetof(_RTTICompleteObjectLocator_64, objectBase));
-            INT64 objectLocator64 = TO_INT64(objectLocator32);
+			uint32_t tdOffset32 = get_32bit(col + offsetof(_RTTICompleteObjectLocator_64, typeDescriptor));
+            int64_t tdOffset64 = TO_INT64(tdOffset32);	 
+			uint32_t cdOffset32 = get_32bit(col + offsetof(_RTTICompleteObjectLocator_64, classDescriptor));
+            int64_t cdOffset64 = TO_INT64(cdOffset32);
+			uint32_t objectLocator32 = get_32bit(col + offsetof(_RTTICompleteObjectLocator_64, objectBase));
+            int64_t objectLocator64 = TO_INT64(objectLocator32);
         		 
-			INT64 colBase64 = ((INT64) col - objectLocator64);
+			int64_t colBase64 = ((int64_t) col - objectLocator64);
 			ea_t typeInfo = (ea_t) (colBase64 + tdOffset64);
 			type_info::tryStruct(typeInfo);
 
@@ -876,7 +875,7 @@ BOOL RTTI::_RTTICompleteObjectLocator::tryStruct(ea_t col)
 			{
 				char buffer[64];
 				sprintf_s(buffer, sizeof(buffer), "0x%llX", typeInfo);
-				setComment(ea, buffer, TRUE);
+				setComment(ea, buffer, true);
 			}
 
 			ea = (col + offsetof(_RTTICompleteObjectLocator_64, classDescriptor));
@@ -884,30 +883,30 @@ BOOL RTTI::_RTTICompleteObjectLocator::tryStruct(ea_t col)
 			{
 				char buffer[64];
 				sprintf_s(buffer, sizeof(buffer), "0x%llX", classDescriptor);
-				setComment(ea, buffer, TRUE);
+				setComment(ea, buffer, true);
 			}
         }
 
-		return TRUE;
+		return true;
 	}
 
-	return FALSE;
+	return false;
 }
 
 
 // --------------------------- Base Class Descriptor ---------------------------
 
-// Return TRUE if address is a valid BCD
-BOOL RTTI::_RTTIBaseClassDescriptor::isValid(ea_t bcd, INT64 colBase64)
+// Return true if address is a valid BCD
+bool RTTI::_RTTIBaseClassDescriptor::isValid(ea_t bcd, int64_t colBase64)
 {
-    // TRUE if already known
+    // true if already known
     if (bcdSet.find(bcd) != bcdSet.end())
-        return TRUE;
+        return true;
 
     if (IS_VALID_ADDR(bcd))
     {
         // Check attributes flags first
-        UINT32 attributes = -1;
+        uint32_t attributes = -1;
         if (getVerify32((bcd + offsetof(_RTTIBaseClassDescriptor, attributes)), attributes))
         {
             // Valid flags are the lower byte only
@@ -922,19 +921,19 @@ BOOL RTTI::_RTTIBaseClassDescriptor::isValid(ea_t bcd, INT64 colBase64)
                 else
                 {
                     // When 64bit plus COL bass ea_t
-					UINT32 tdOffset32 = get_32bit(bcd + offsetof(_RTTIBaseClassDescriptor, typeDescriptor));
-                    INT64 tdOffset64 = TO_INT64(tdOffset32);
+					uint32_t tdOffset32 = get_32bit(bcd + offsetof(_RTTIBaseClassDescriptor, typeDescriptor));
+                    int64_t tdOffset64 = TO_INT64(tdOffset32);
 					return type_info_64::isValid((ea_t) (colBase64 + tdOffset64));
                 }
             }
         }
     }
 
-    return FALSE;
+    return false;
 }
 
 // Put BCD structure at address
-void RTTI::_RTTIBaseClassDescriptor::tryStruct(ea_t bcd, __out_bcount(MAXSTR) LPSTR baseClassName, INT64 colBase64)
+void RTTI::_RTTIBaseClassDescriptor::tryStruct(ea_t bcd, char * baseClassName, int64_t colBase64)
 {
     // Only place it once
     if (bcdSet.find(bcd) != bcdSet.end())
@@ -949,8 +948,8 @@ void RTTI::_RTTIBaseClassDescriptor::tryStruct(ea_t bcd, __out_bcount(MAXSTR) LP
         else
         {
             // When 64bit plus COL bass ea_t
-			UINT32 tdOffset32 = get_32bit(bcd + offsetof(_RTTIBaseClassDescriptor, typeDescriptor));
-            INT64 tdOffset64 = TO_INT64(tdOffset32);
+			uint32_t tdOffset32 = get_32bit(bcd + offsetof(_RTTIBaseClassDescriptor, typeDescriptor));
+            int64_t tdOffset64 = TO_INT64(tdOffset32);
 			typeInfo = (ea_t) (colBase64 + tdOffset64);
         }
 
@@ -964,7 +963,7 @@ void RTTI::_RTTIBaseClassDescriptor::tryStruct(ea_t bcd, __out_bcount(MAXSTR) LP
 
     if (IS_VALID_ADDR(bcd))
     {
-        UINT32 attributes = get_32bit(bcd + offsetof(_RTTIBaseClassDescriptor, attributes));
+        uint32_t attributes = get_32bit(bcd + offsetof(_RTTIBaseClassDescriptor, attributes));
         //msg("BCD: 0x%llX\n", bcd);
         tryStructRTTI(bcd, s_BaseClassDescriptor_ID, NULL, ((attributes & BCD_HASPCHD) > 0));
 
@@ -984,21 +983,21 @@ void RTTI::_RTTIBaseClassDescriptor::tryStruct(ea_t bcd, __out_bcount(MAXSTR) LP
             {
                 // EA_64
 				fixDword(chdOffset);
-				UINT32 chdOffset32 = get_32bit(chdOffset);
-                INT64 chdOffset64 = TO_INT64(chdOffset32);              			 
+				uint32_t chdOffset32 = get_32bit(chdOffset);
+                int64_t chdOffset64 = TO_INT64(chdOffset32);              			 
 				chd = (ea_t) (colBase64 + chdOffset64);
 				if (!hasComment(chdOffset))
 				{
 					char buffer[32];
 					sprintf_s(buffer, sizeof(buffer), "0x%llX", chd);
-					setComment(chdOffset, buffer, TRUE);
+					setComment(chdOffset, buffer, true);
 				}
             }
 
             if (IS_VALID_ADDR(chd))
                 _RTTIClassHierarchyDescriptor::tryStruct(chd, colBase64);
             else
-                _ASSERT(FALSE);
+                _ASSERT(false);
         }
 
         // Place type_info struct
@@ -1011,7 +1010,7 @@ void RTTI::_RTTIBaseClassDescriptor::tryStruct(ea_t bcd, __out_bcount(MAXSTR) LP
         else
         {
             // When 64bit plus COL bass ea_t
-			UINT32 tdOffset = get_32bit(bcd + offsetof(_RTTIBaseClassDescriptor, typeDescriptor));
+			uint32_t tdOffset = get_32bit(bcd + offsetof(_RTTIBaseClassDescriptor, typeDescriptor));
 			typeInfo = (colBase64 + (ea_t)tdOffset);
         }
         type_info::tryStruct(typeInfo);
@@ -1028,7 +1027,7 @@ void RTTI::_RTTIBaseClassDescriptor::tryStruct(ea_t bcd, __out_bcount(MAXSTR) LP
 			if (!hasComment(ea))
             {
                 qstring s("");
-                BOOL b = 0;
+                bool b = 0;
                 #define ATRIBFLAG(_flag) { if (attributes & _flag) { if (b) s += " | ";  s += #_flag; b = 1; } }
                 ATRIBFLAG(BCD_NOTVISIBLE);
                 ATRIBFLAG(BCD_AMBIGUOUS);
@@ -1038,7 +1037,7 @@ void RTTI::_RTTIBaseClassDescriptor::tryStruct(ea_t bcd, __out_bcount(MAXSTR) LP
                 ATRIBFLAG(BCD_NONPOLYMORPHIC);
                 ATRIBFLAG(BCD_HASPCHD);
                 #undef ATRIBFLAG
-                setComment(ea, s.c_str(), TRUE);
+                setComment(ea, s.c_str(), true);
             }
         }
 
@@ -1059,36 +1058,36 @@ void RTTI::_RTTIBaseClassDescriptor::tryStruct(ea_t bcd, __out_bcount(MAXSTR) LP
         }
     }
     else
-        _ASSERT(FALSE);
+        _ASSERT(false);
 }
 
 
 // --------------------------- Class Hierarchy Descriptor ---------------------------
 
 // Return true if address is a valid CHD structure
-BOOL RTTI::_RTTIClassHierarchyDescriptor::isValid(ea_t chd, INT64 colBase64)
+bool RTTI::_RTTIClassHierarchyDescriptor::isValid(ea_t chd, int64_t colBase64)
 {
-    // TRUE is already known
+    // true is already known
     if (chdSet.find(chd) != chdSet.end())
-        return(TRUE);
+        return(true);
 
     if (IS_VALID_ADDR(chd))
     {
         // signature should be zero statically
-        UINT32 signature = -1;
+        uint32_t signature = -1;
         if (getVerify32((chd + offsetof(_RTTIClassHierarchyDescriptor, signature)), signature))
         {
             if (signature == 0)
             {
                 // Check attributes flags
-                UINT32 attributes = -1;
+                uint32_t attributes = -1;
                 if (getVerify32((chd + offsetof(_RTTIClassHierarchyDescriptor, attributes)), attributes))
                 {
                     // Valid flags are the lower nibble only
                     if ((attributes & 0xFFFFFFF0) == 0)
                     {
                         // Should have at least one base class
-                        UINT32 numBaseClasses = 0;
+                        uint32_t numBaseClasses = 0;
                         if (getVerify32((chd + offsetof(_RTTIClassHierarchyDescriptor, numBaseClasses)), numBaseClasses))
                         {
                             if (numBaseClasses >= 1)
@@ -1109,14 +1108,14 @@ BOOL RTTI::_RTTIClassHierarchyDescriptor::isValid(ea_t chd, INT64 colBase64)
                                 else
                                 {
                                     // When 64bit plus COL bass ea_t
-									UINT32 baseClassArrayOffset32 = get_32bit(chd + offsetof(_RTTIClassHierarchyDescriptor, baseClassArray));
-                                    INT64 baseClassArrayOffset64 = TO_INT64(baseClassArrayOffset32);
+									uint32_t baseClassArrayOffset32 = get_32bit(chd + offsetof(_RTTIClassHierarchyDescriptor, baseClassArray));
+                                    int64_t baseClassArrayOffset64 = TO_INT64(baseClassArrayOffset32);
 									baseClassArray = (ea_t) (colBase64 + baseClassArrayOffset64);
                                     if (IS_VALID_ADDR(baseClassArray))
                                     {
 										// When 64bit plus COL bass ea_t
-										UINT32 baseClassDescriptor32 = get_32bit(baseClassArray);
-                                        INT64 baseClassDescriptor64 = (TO_INT64(baseClassDescriptor32) + colBase64);
+										uint32_t baseClassDescriptor32 = get_32bit(baseClassArray);
+                                        int64_t baseClassDescriptor64 = (TO_INT64(baseClassDescriptor32) + colBase64);
 										return RTTI::_RTTIBaseClassDescriptor::isValid((ea_t) baseClassDescriptor64, colBase64);
                                     }
                                 }
@@ -1128,11 +1127,11 @@ BOOL RTTI::_RTTIClassHierarchyDescriptor::isValid(ea_t chd, INT64 colBase64)
         }
     }
 
-    return FALSE;
+    return false;
 }
 
 // Put CHD structure at address
-void RTTI::_RTTIClassHierarchyDescriptor::tryStruct(ea_t chd, INT64 colBase64)
+void RTTI::_RTTIClassHierarchyDescriptor::tryStruct(ea_t chd, int64_t colBase64)
 {
     // Only place it once per address
     if (chdSet.find(chd) != chdSet.end())
@@ -1147,25 +1146,25 @@ void RTTI::_RTTIClassHierarchyDescriptor::tryStruct(ea_t chd, INT64 colBase64)
         tryStructRTTI(chd, s_ClassHierarchyDescriptor_ID);
 
         // Place attributes comment
-        UINT32 attributes = get_32bit(chd + offsetof(_RTTIClassHierarchyDescriptor, attributes));
+        uint32_t attributes = get_32bit(chd + offsetof(_RTTIClassHierarchyDescriptor, attributes));
         if (!g_optionPlaceStructs && attributes)
         {
 			ea_t ea = (chd + offsetof(_RTTIClassHierarchyDescriptor, attributes));
 			if (!hasComment(ea))
             {
                 qstring s("");
-                BOOL b = 0;
+                bool b = 0;
                 #define ATRIBFLAG(_flag) { if (attributes & _flag) { if (b) s += " | ";  s += #_flag; b = 1; } }
                 ATRIBFLAG(CHD_MULTINH);
                 ATRIBFLAG(CHD_VIRTINH);
                 ATRIBFLAG(CHD_AMBIGUOUS);
                 #undef ATRIBFLAG
-                setComment(ea, s.c_str(), TRUE);
+                setComment(ea, s.c_str(), true);
             }
         }
 
         // ---- Place BCD's ----
-        UINT32 numBaseClasses = 0;
+        uint32_t numBaseClasses = 0;
         if (getVerify32((chd + offsetof(_RTTIClassHierarchyDescriptor, numBaseClasses)), numBaseClasses))
         {
             // Get pointer
@@ -1178,7 +1177,7 @@ void RTTI::_RTTIClassHierarchyDescriptor::tryStruct(ea_t chd, INT64 colBase64)
             else
             {
                 // 64bit plus COL bass ea_t
-				UINT32 baseClassArrayOffset = get_32bit(chd + offsetof(_RTTIClassHierarchyDescriptor, baseClassArray));
+				uint32_t baseClassArrayOffset = get_32bit(chd + offsetof(_RTTIClassHierarchyDescriptor, baseClassArray));
 				baseClassArray = (colBase64 + (ea_t) baseClassArrayOffset);
 
 				ea_t ea = (chd + offsetof(_RTTIClassHierarchyDescriptor, baseClassArray));
@@ -1186,7 +1185,7 @@ void RTTI::_RTTIClassHierarchyDescriptor::tryStruct(ea_t chd, INT64 colBase64)
 				{
 					char buffer[32];
 					_snprintf_s(buffer, sizeof(buffer), SIZESTR(buffer), "0x%llX", baseClassArray);
-					setComment(ea, buffer, TRUE);
+					setComment(ea, buffer, true);
 				}
             }
 
@@ -1216,7 +1215,7 @@ void RTTI::_RTTIClassHierarchyDescriptor::tryStruct(ea_t chd, INT64 colBase64)
                     }
                 }
 
-                for (UINT32 i = 0; i < numBaseClasses; i++, baseClassArray += sizeof(UINT32))
+                for (uint32_t i = 0; i < numBaseClasses; i++, baseClassArray += sizeof(uint32_t))
                 {
                     fixDword(baseClassArray);
 
@@ -1228,12 +1227,12 @@ void RTTI::_RTTIClassHierarchyDescriptor::tryStruct(ea_t chd, INT64 colBase64)
                         {
                             // Add index comment to to it
                             if (numBaseClasses == 1)
-                                setComment(baseClassArray, "  BaseClass", FALSE);
+                                setComment(baseClassArray, "  BaseClass", false);
                             else
                             {
                                 char ptrComent[MAXSTR];
                                 _snprintf_s(ptrComent, sizeof(ptrComent), SIZESTR(ptrComent), format, i);
-                                setComment(baseClassArray, ptrComent, FALSE);
+                                setComment(baseClassArray, ptrComent, false);
                             }
                         }
 
@@ -1245,8 +1244,8 @@ void RTTI::_RTTIClassHierarchyDescriptor::tryStruct(ea_t chd, INT64 colBase64)
                     else
                     {
                         // EA_64
-						UINT32 bcdOffset32 = get_32bit(baseClassArray);
-                        INT64 bcdOffset64 = TO_INT64(bcdOffset32);
+						uint32_t bcdOffset32 = get_32bit(baseClassArray);
+                        int64_t bcdOffset64 = TO_INT64(bcdOffset32);
 						ea_t bcd = (ea_t) (colBase64 + bcdOffset64);
 
                         if (!hasComment(baseClassArray))
@@ -1256,13 +1255,13 @@ void RTTI::_RTTIClassHierarchyDescriptor::tryStruct(ea_t chd, INT64 colBase64)
                             {
                                 char buffer[MAXSTR];
                                 sprintf_s(buffer, sizeof(buffer), "  BaseClass 0x%llX", bcd);
-                                setComment(baseClassArray, buffer, FALSE);
+                                setComment(baseClassArray, buffer, false);
                             }
                             else
                             {
                                 char buffer[MAXSTR];
                                 _snprintf_s(buffer, sizeof(buffer), SIZESTR(buffer), format, i, bcd);
-                                setComment(baseClassArray, buffer, FALSE);
+                                setComment(baseClassArray, buffer, false);
                             }
                         }
 
@@ -1309,20 +1308,20 @@ void RTTI::_RTTIClassHierarchyDescriptor::tryStruct(ea_t chd, INT64 colBase64)
                 }
             }
             else
-                _ASSERT(FALSE);
+                _ASSERT(false);
         }
         else
-            _ASSERT(FALSE);
+            _ASSERT(false);
     }
     else
-        _ASSERT(FALSE);
+        _ASSERT(false);
 }
 
 
 // --------------------------- Vftable ---------------------------
 
 // Get list of base class descriptor info
-static void RTTI::getBCDInfo(ea_t col, __out bcdList &list, __out UINT32 &numBaseClasses)
+void RTTI::getBCDInfo(ea_t col, bcdList &list, uint32_t &numBaseClasses)
 {
 	numBaseClasses = 0;
 
@@ -1340,7 +1339,7 @@ static void RTTI::getBCDInfo(ea_t col, __out bcdList &list, __out UINT32 &numBas
                 ea_t baseClassArray = plat.getEa32(chd + offsetof(_RTTIClassHierarchyDescriptor, baseClassArray));
 			    if(baseClassArray && (baseClassArray != BADADDR))
 			    {
-				    for(UINT32 i = 0; i < numBaseClasses; i++, baseClassArray += sizeof(UINT32))
+				    for(uint32_t i = 0; i < numBaseClasses; i++, baseClassArray += sizeof(uint32_t))
 				    {
                         // Get next BCD
                         ea_t bcd = get_32bit(baseClassArray);
@@ -1351,13 +1350,13 @@ static void RTTI::getBCDInfo(ea_t col, __out bcdList &list, __out UINT32 &numBas
                         type_info_32::getName(typeInfo, bi->m_name, SIZESTR(bi->m_name));
 
 					    // Add info to list
-                        UINT32 mdisp = get_32bit(bcd + (offsetof(_RTTIBaseClassDescriptor, pmd) + offsetof(PMD, mdisp)));
-                        UINT32 pdisp = get_32bit(bcd + (offsetof(_RTTIBaseClassDescriptor, pmd) + offsetof(PMD, pdisp)));
-                        UINT32 vdisp = get_32bit(bcd + (offsetof(_RTTIBaseClassDescriptor, pmd) + offsetof(PMD, vdisp)));
+                        uint32_t mdisp = get_32bit(bcd + (offsetof(_RTTIBaseClassDescriptor, pmd) + offsetof(PMD, mdisp)));
+                        uint32_t pdisp = get_32bit(bcd + (offsetof(_RTTIBaseClassDescriptor, pmd) + offsetof(PMD, pdisp)));
+                        uint32_t vdisp = get_32bit(bcd + (offsetof(_RTTIBaseClassDescriptor, pmd) + offsetof(PMD, vdisp)));
                         // As signed int
-                        bi->m_pmd.mdisp = *((PINT32) &mdisp);
-                        bi->m_pmd.pdisp = *((PINT32) &pdisp);
-                        bi->m_pmd.vdisp = *((PINT32) &vdisp);
+                        bi->m_pmd.mdisp = *((int32_t*) &mdisp);
+                        bi->m_pmd.pdisp = *((int32_t*) &pdisp);
+                        bi->m_pmd.vdisp = *((int32_t*) &vdisp);
                         bi->m_attribute = get_32bit(bcd + offsetof(_RTTIBaseClassDescriptor, attributes));
 
 					    //msg("   BN: [%d] \"%s\", ATB: %04X\n", i, szBuffer1, get_32bit((ea_t) &pBCD->attributes));
@@ -1370,11 +1369,11 @@ static void RTTI::getBCDInfo(ea_t col, __out bcdList &list, __out UINT32 &numBas
     else
     {
         // 64bit version
-        UINT32 cdOffset32 = get_32bit(col + offsetof(_RTTICompleteObjectLocator_64, classDescriptor));
-        INT64 cdOffset64 = TO_INT64(cdOffset32);
-        UINT32 objectLocator32 = get_32bit(col + offsetof(_RTTICompleteObjectLocator_64, objectBase));
-        INT64 objectLocator64 = TO_INT64(objectLocator32);
-        INT64 colBase64 = ((INT64) col - objectLocator64);
+        uint32_t cdOffset32 = get_32bit(col + offsetof(_RTTICompleteObjectLocator_64, classDescriptor));
+        int64_t cdOffset64 = TO_INT64(cdOffset32);
+        uint32_t objectLocator32 = get_32bit(col + offsetof(_RTTICompleteObjectLocator_64, objectBase));
+        int64_t objectLocator64 = TO_INT64(objectLocator32);
+        int64_t colBase64 = ((int64_t) col - objectLocator64);
         ea_t chd = (ea_t) (colBase64 + cdOffset64);
 
 	    if(chd)
@@ -1384,31 +1383,31 @@ static void RTTI::getBCDInfo(ea_t col, __out bcdList &list, __out UINT32 &numBas
                 list.resize(numBaseClasses);
 
 			    // Get pointer
-                UINT32 bcaOffset32 = get_32bit(chd + offsetof(_RTTIClassHierarchyDescriptor, baseClassArray));
-                INT64 bcaOffset64 = TO_INT64(bcaOffset32);
+                uint32_t bcaOffset32 = get_32bit(chd + offsetof(_RTTIClassHierarchyDescriptor, baseClassArray));
+                int64_t bcaOffset64 = TO_INT64(bcaOffset32);
                 ea_t baseClassArray = (ea_t) (colBase64 + bcaOffset64);
 			    if(IS_VALID_ADDR(baseClassArray))
 			    {
-				    for(UINT32 i = 0; i < numBaseClasses; i++, baseClassArray += sizeof(UINT32))
+				    for(uint32_t i = 0; i < numBaseClasses; i++, baseClassArray += sizeof(uint32_t))
 				    {
-                        UINT32 bcdOffset32 = get_32bit(baseClassArray);
-                        INT64 bcdOffset64 = TO_INT64(bcdOffset32);
+                        uint32_t bcdOffset32 = get_32bit(baseClassArray);
+                        int64_t bcdOffset64 = TO_INT64(bcdOffset32);
                         ea_t bcd = (ea_t) (colBase64 + bcdOffset64);
 
-                        UINT32 tdOffset32 = get_32bit(bcd + offsetof(_RTTIBaseClassDescriptor, typeDescriptor));
-                        INT64 tdOffset64 = TO_INT64(tdOffset32);
+                        uint32_t tdOffset32 = get_32bit(bcd + offsetof(_RTTIBaseClassDescriptor, typeDescriptor));
+                        int64_t tdOffset64 = TO_INT64(tdOffset32);
                         ea_t typeInfo = (ea_t) (colBase64 + tdOffset64);
                         bcdInfo *bi = &list[i];
                         type_info_64::getName(typeInfo, bi->m_name, SIZESTR(bi->m_name));
 
 					    // Add info to list
-                        UINT32 mdisp = get_32bit(bcd + (offsetof(_RTTIBaseClassDescriptor, pmd) + offsetof(PMD, mdisp)));
-                        UINT32 pdisp = get_32bit(bcd + (offsetof(_RTTIBaseClassDescriptor, pmd) + offsetof(PMD, pdisp)));
-                        UINT32 vdisp = get_32bit(bcd + (offsetof(_RTTIBaseClassDescriptor, pmd) + offsetof(PMD, vdisp)));
+                        uint32_t mdisp = get_32bit(bcd + (offsetof(_RTTIBaseClassDescriptor, pmd) + offsetof(PMD, mdisp)));
+                        uint32_t pdisp = get_32bit(bcd + (offsetof(_RTTIBaseClassDescriptor, pmd) + offsetof(PMD, pdisp)));
+                        uint32_t vdisp = get_32bit(bcd + (offsetof(_RTTIBaseClassDescriptor, pmd) + offsetof(PMD, vdisp)));
                         // As signed int
-                        bi->m_pmd.mdisp = *((PINT32) &mdisp);
-                        bi->m_pmd.pdisp = *((PINT32) &pdisp);
-                        bi->m_pmd.vdisp = *((PINT32) &vdisp);
+                        bi->m_pmd.mdisp = *((int32_t*) &mdisp);
+                        bi->m_pmd.pdisp = *((int32_t*) &pdisp);
+                        bi->m_pmd.vdisp = *((int32_t*) &vdisp);
                         bi->m_attribute = get_32bit(bcd + offsetof(_RTTIBaseClassDescriptor, attributes));
 
 					    //msg("   BN: [%d] \"%s\", ATB: %04X\n", i, szBuffer1, get_32bit((ea_t) &pBCD->attributes));
@@ -1424,10 +1423,10 @@ static void RTTI::getBCDInfo(ea_t col, __out bcdList &list, __out UINT32 &numBas
 // ======================================================================================
 
 // Process RTTI vftable info
-// Returns TRUE if if vftable and wasn't named on entry
-BOOL RTTI::processVftable(ea_t vft, ea_t col, BOOL known)
+// Returns true if if vftable and wasn't named on entry
+bool RTTI::processVftable(ea_t vft, ea_t col, bool known)
 {
-	BOOL result = FALSE;
+	bool result = false;
 
     ea_t chd = BADADDR;
     ea_t typeInfo = BADADDR;
@@ -1440,9 +1439,9 @@ BOOL RTTI::processVftable(ea_t vft, ea_t col, BOOL known)
     else
 	{
         // 64bit offsets relative to objectBase
-		UINT32 tdOffset = get_32bit(col + offsetof(_RTTICompleteObjectLocator_64, typeDescriptor));
-        UINT32 chdOffset = get_32bit(col + offsetof(_RTTICompleteObjectLocator_64, classDescriptor));
-		UINT32 objectLocator = get_32bit(col + offsetof(_RTTICompleteObjectLocator_64, objectBase));
+		uint32_t tdOffset = get_32bit(col + offsetof(_RTTICompleteObjectLocator_64, typeDescriptor));
+        uint32_t chdOffset = get_32bit(col + offsetof(_RTTICompleteObjectLocator_64, classDescriptor));
+		uint32_t objectLocator = get_32bit(col + offsetof(_RTTICompleteObjectLocator_64, objectBase));
 
         ea_t colBase = (col - (ea_t) objectLocator);
         typeInfo = (colBase + (ea_t) tdOffset);
@@ -1459,15 +1458,15 @@ BOOL RTTI::processVftable(ea_t vft, ea_t col, BOOL known)
         char demangledColName[MAXSTR];
         getPlainTypeName(colName, demangledColName);
 
-        UINT32 chdAttributes = get_32bit(chd + offsetof(_RTTIClassHierarchyDescriptor, attributes));
-        UINT32 offset = get_32bit(col + offsetof(_RTTICompleteObjectLocator, offset));
+        uint32_t chdAttributes = get_32bit(chd + offsetof(_RTTIClassHierarchyDescriptor, attributes));
+        uint32_t offset = get_32bit(col + offsetof(_RTTICompleteObjectLocator, offset));
 
 	    // Parse BCD info
 	    bcdList list;
-        UINT32 numBaseClasses;
+        uint32_t numBaseClasses;
 	    getBCDInfo(col, list, numBaseClasses);
 
-        BOOL sucess = FALSE, isTopLevel = FALSE;
+        bool sucess = false, isTopLevel = false;
         qstring cmt;
 
 	    // ======= Simple or no inheritance
@@ -1476,7 +1475,7 @@ BOOL RTTI::processVftable(ea_t vft, ea_t col, BOOL known)
 		    // Set the vftable name
             if (!hasName(vft))
 		    {
-				result = TRUE;
+				result = true;
 
                 // Decorate raw name as a vftable. I.E. const Name::`vftable'
                 char decorated[MAXSTR];
@@ -1501,10 +1500,10 @@ BOOL RTTI::processVftable(ea_t vft, ea_t col, BOOL known)
                 getPlainTypeName(list[0].m_name, plainName);
                 cmt.sprnt("%s%s: ", ((list[0].m_name[3] == 'V') ? "" : "struct "), plainName);
                 placed++;
-                isTopLevel = ((strcmp(list[0].m_name, colName) == 0) ? TRUE : FALSE);
+                isTopLevel = ((strcmp(list[0].m_name, colName) == 0) ? true : false);
 
                 // Child object hierarchy
-                for (UINT32 i = 1; i < numBaseClasses; i++)
+                for (uint32_t i = 1; i < numBaseClasses; i++)
                 {
                     // Append name
                     getPlainTypeName(list[i].m_name, plainName);
@@ -1520,13 +1519,13 @@ BOOL RTTI::processVftable(ea_t vft, ea_t col, BOOL known)
             {
                 // Plain, no inheritance object(s)
                 cmt.sprnt("%s%s: ", ((colName[3] == 'V') ? "" : "struct "), demangledColName);
-                isTopLevel = TRUE;
+                isTopLevel = true;
             }
 
             if (placed > 1)
                 cmt += ';';
 
-            sucess = TRUE;
+            sucess = true;
 	    }
 	    // ======= Multiple inheritance, and, or, virtual inheritance hierarchies
         else
@@ -1539,12 +1538,12 @@ BOOL RTTI::processVftable(ea_t vft, ea_t col, BOOL known)
             {
                 _ASSERT(strcmp(colName, list[0].m_name) == 0);
                 bi = &list[0];
-                isTopLevel = TRUE;
+                isTopLevel = true;
             }
             else
             {
                 // Get our object BCD level by matching COL offset to displacement
-                for (UINT32 i = 0; i < numBaseClasses; i++)
+                for (uint32_t i = 0; i < numBaseClasses; i++)
                 {
                     if (list[i].m_pmd.mdisp == offset)
                     {
@@ -1558,7 +1557,7 @@ BOOL RTTI::processVftable(ea_t vft, ea_t col, BOOL known)
                 if (!bi)
                 {
                     //msg("** %llX MI COL class offset: %X(%d) not in BCD.\n", vft, offset, offset);
-                    for (UINT32 i = 0; i < numBaseClasses; i++)
+                    for (uint32_t i = 0; i < numBaseClasses; i++)
                     {
                         if (list[i].m_pmd.pdisp != -1)
                         {
@@ -1579,7 +1578,7 @@ BOOL RTTI::processVftable(ea_t vft, ea_t col, BOOL known)
                     // Set the vft name
                     if (!hasName(vft))
                     {
-						result = TRUE;
+						result = true;
 
                         char decorated[MAXSTR];
                         _snprintf_s(decorated, sizeof(decorated), SIZESTR(decorated), FORMAT_RTTI_VFTABLE, SKIP_TD_TAG(colName));
@@ -1601,7 +1600,7 @@ BOOL RTTI::processVftable(ea_t vft, ea_t col, BOOL known)
                     placed++;
 
                     // Concatenate forward child hierarchy
-                    for (UINT32 i = 1; i < numBaseClasses; i++)
+                    for (uint32_t i = 1; i < numBaseClasses; i++)
                     {
                         getPlainTypeName(list[i].m_name, plainName);
                         cmt.cat_sprnt("%s%s, ", ((list[i].m_name[3] == 'V') ? "" : "struct "), plainName);
@@ -1619,7 +1618,7 @@ BOOL RTTI::processVftable(ea_t vft, ea_t col, BOOL known)
                     // Set vftable name
                     if (!hasName(vft))
                     {
-						result = TRUE;
+						result = true;
 
                         char decorated[MAXSTR];
 						strcpy(decorated, FORMAT_RTTI_VFTABLE_PREFIX);
@@ -1675,7 +1674,7 @@ BOOL RTTI::processVftable(ea_t vft, ea_t col, BOOL known)
                 if (placed > 1)
                     cmt += ';';
 
-                sucess = TRUE;
+                sucess = true;
             }
             else
                 msg("%llX ** Couldn't find a BCD for MI/VI hierarchy!\n", vft);
@@ -1694,7 +1693,7 @@ BOOL RTTI::processVftable(ea_t vft, ea_t col, BOOL known)
 			if (!hasAnteriorComment(colPtr))
 				setAnteriorComment(colPtr, "\n; %s %s", ((colName[3] == 'V') ? "class" : "struct"), cmt.c_str());
 
-            result = TRUE;
+            result = true;
         }
     }
     else
@@ -1726,7 +1725,7 @@ BOOL RTTI::processVftable(ea_t vft, ea_t col, BOOL known)
 
 // New strategy: Since IDA's own internal RTTI system is so good now at leat at version 9, we'll
 // first gather all the IDA defined ones into cache.
-BOOL RTTI::gatherKnownRttiData()
+bool RTTI::gatherKnownRttiData()
 {
 	try
 	{
@@ -1734,10 +1733,10 @@ BOOL RTTI::gatherKnownRttiData()
         #define PATE(_prefix, _verify, _eaSet) { _prefix, _verify, _eaSet }
         struct PATCE
         {
-            LPCSTR prefix;
-            LPCSTR verify;
+            const char * prefix;
+            const char * verify;
             eaSet *set;
-        } __declspec(align(32)) rttiTypePatterns[] =
+        } ALIGN(32) rttiTypePatterns[] =
         {
             PATE("??_R0", "`RTTI Type Descriptor'", &tdSet),
             PATE("??_R1", "`RTTI Base Class Descriptor", &bcdSet),
@@ -1752,7 +1751,7 @@ BOOL RTTI::gatherKnownRttiData()
 	    for (size_t i = 0; i < nameCount; i++)
 	    {
             // Next name
-            LPCSTR name = get_nlist_name(i);
+            const char * name = get_nlist_name(i);
             for (size_t j = 0; j < _countof(rttiTypePatterns); j++)
             {
                 // Match a known RTTI type pattern?
@@ -1776,7 +1775,7 @@ BOOL RTTI::gatherKnownRttiData()
             if(i % 1000)
 			    if (WaitBox::isUpdateTime())
 				    if (WaitBox::updateAndCancelCheck())
-					    return TRUE;
+					    return true;
 	    }
         TIMESTAMP endTime = (GetTimeStamp() - startTime);
         char buf1[32], buf2[32], buf3[32], buf4[32];
@@ -1791,5 +1790,5 @@ BOOL RTTI::gatherKnownRttiData()
 	    for (const eaSet *sp: all) superSet.insert(sp->begin(), sp->end());
 	}
 	CATCH()
-    return FALSE;
+    return false;
 }

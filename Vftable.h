@@ -7,12 +7,12 @@ namespace vftable
 	// vftable info container
 	struct vtinfo
 	{
-		ea_t start, end; // union { EA_32 ea_t} addresses
+		ea_t start, end; // addresses
 		int  methodCount;
 		//char name[MAXSTR];
 	};
-	BOOL getTableInfo(ea_t ea, vtinfo &info);
+	bool getTableInfo(ea_t ea, vtinfo &info);
 
-	// Returns TRUE if mangled name prefix indicates a vftable
-	inline BOOL isValid(LPCSTR name){ return(*((PDWORD) name) == 0x375F3F3F /*"??_7"*/); }
+	// Returns true if mangled name prefix indicates a vftable
+	inline bool isValid(const char *name){ return(*((const uint32_t *) name) == 0x375F3F3F /*"??_7"*/); }
 }

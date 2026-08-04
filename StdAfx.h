@@ -2,27 +2,34 @@
 // Common includes and defines
 #pragma once
 
+#ifdef _WIN32
 #define WIN32_LEAN_AND_MEAN
 #define WINVER		 0x0A00 // _WIN32_WINNT_WIN10
 #define _WIN32_WINNT 0x0A00
 #include <windows.h>
+#include <tchar.h>
+#include <crtdbg.h>
+#include <intrin.h>
+#endif
+
 #include <stdlib.h>
 #include <stdio.h>
 #include <time.h>
-#include <tchar.h>
 #include <math.h>
-#include <crtdbg.h>
-#include <intrin.h>
 
+#ifdef _MSC_VER
 #pragma intrinsic(memset, memcpy, strcat, strcmp, strcpy, strlen, abs, fabs, labs, atan, atan2, tan, sqrt, sin, cos)
+#endif
 
-// IDA SDK
+// IDA SDK (must be included BEFORE Qt to avoid qstrlen/qstrncmp redefinition)
 #define USE_DANGEROUS_FUNCTIONS
 #define USE_STANDARD_FILE_FUNCTIONS
+#ifdef _MSC_VER
 #pragma warning(push)
 #pragma warning(disable:4244) // conversion from 'ssize_t' to 'int', possible loss of data
 #pragma warning(disable:4267) // conversion from 'size_t' to 'uint32', possible loss of data
 #pragma warning(disable:4018) // warning C4018: '<': signed/unsigned mismatch
+#endif
 #include <ida.hpp>
 // Until it actually happens
 #undef DEPRECATED
@@ -33,9 +40,18 @@
 #include <typeinf.hpp>
 #include <nalt.hpp>
 #include <demangle.hpp>
+#ifdef _MSC_VER
 #pragma warning(pop)
+#endif
 
-// Qt SDK
+// Rename Qt's qstr* functions to avoid conflict with IDA SDK's pro.h
+#define qstrlen qt_qstrlen
+#define qstrncmp qt_qstrncmp
+#define qstrncpy qt_qstrncpy
+#define qstrcmp qt_qstrcmp
+#define qstrdup qt_qstrdup
+
+// Qt SDK (after IDA SDK headers)
 #include <QtCore/QTextStream>
 #include <QtCore/QFile>
 #include <QtWidgets/QApplication>
@@ -46,13 +62,15 @@
 #include <QtWidgets/QHeaderView>
 #include <QtWidgets/QScrollBar>
 #include <QResource>
-// IDA SDK Qt libs
-#pragma comment(lib, "Qt6Core.lib")
-#pragma comment(lib, "Qt6Gui.lib")
-#pragma comment(lib, "Qt6Widgets.lib")
 
-#include "Utility.h"
-#include "undname.h"
+#undef qstrlen
+#undef qstrncmp
+#undef qstrncpy
+#undef qstrcmp
+#undef qstrdup
+
+// Cross-platform compatibility layer
+#include "Compat.h"
 
 #include <vector>
 #include <set>
